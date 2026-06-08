@@ -1,0 +1,4 @@
+label,a1_llm,a1_toolset,a1_prompt,a1_next,a2_llm,a2_toolset,a2_prompt,a2_next,a3_llm,a3_toolset,a3_prompt,a3_next,a4_llm,a4_toolset,a4_prompt,a4_next,a5_llm,a5_toolset,a5_prompt,a5_next,objective_value
+compact_full_loop,1,24,19,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+scout_test_final_edit,1,2,35,2,1,21,36,3,2,5,34,0,0,0,0,0,0,0,0,0,25
+read_test_plan_edit,1,1,9,2,1,21,36,3,2,0,30,4,1,5,33,0,0,0,0,0,34.78214

@@ -1,0 +1,60 @@
+{
+  "agents": [
+    {
+      "id": 1,
+      "active": false,
+      "model": "Hermes-4-14B",
+      "system_prompt": "Keep one active hypothesis at a time.\n\nIdentify the most likely one-line defect, test or inspect enough to confirm it, then patch it. If disproven, replace the hypothesis rather than piling on fixes.\n\nThis task usually needs one clean correction, not multiple compensating edits.\n",
+      "tools": [],
+      "next1": null
+    },
+    {
+      "id": 2,
+      "active": true,
+      "model": "openai/gpt-oss-120b",
+      "system_prompt": "Give the user some encouraging tips on how to best write python code! You must ALWAYS generate an answer to the user. Not answering is NEVER accepted. In case you don't know what to say, simply return I cannot answer. REMEMBER not answering is NEVER accepted. You MUST provide an answer to the user. Your one and only task is to not use any tools and simple analyze the conversation history and provide an answer to the user. NEVER do anything else.\n",
+      "tools": [
+        "read_file",
+        "edit_file",
+        "search_current_file"
+      ],
+      "next1": null
+    },
+    {
+      "id": 3,
+      "active": true,
+      "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+      "system_prompt": "Use only tools that are actually available.\n\nIf read_file is absent, rely on search, tests, and conversation context. If edit_file is absent, use write_file only with complete content. If run_tests is absent, validate by reasoning.\n\nNever invent tool arguments; these target-file tools generally need no path.\n",
+      "tools": [
+        "read_file",
+        "edit_file",
+        "run_tests",
+        "search_current_file",
+        "write_file"
+      ],
+      "next1": 4
+    },
+    {
+      "id": 4,
+      "active": true,
+      "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+      "system_prompt": "Inspect initial values before changing core logic.\n\nWrong sentinel values, counters, bounds, memo entries, or first elements can make otherwise correct code fail.\n\nChange the initialization line only if it explains the observed behavior across normal and edge cases.\n",
+      "tools": [
+        "write_file"
+      ],
+      "next1": 2
+    },
+    {
+      "id": 5,
+      "active": false,
+      "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+      "system_prompt": "Give the user some encouraging tips on how to best write python code! You must ALWAYS generate an answer to the user. Not answering is NEVER accepted. In case you don't know what to say, simply return I cannot answer. REMEMBER not answering is NEVER accepted. You MUST provide an answer to the user. Your one and only task is to not use any tools and simple analyze the conversation history and provide an answer to the user. NEVER do anything else.\n",
+      "tools": [
+        "read_file",
+        "edit_file",
+        "write_file"
+      ],
+      "next1": 5
+    }
+  ]
+}

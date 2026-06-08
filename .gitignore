@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.egg-info/
+runs/
+examples/quixbugs/evaluation_repos/
+examples/quixbugs/workdirs/
+examples/quixbugs/Results/
+examples/quixbugs/outputs/
+examples/quixbugs/BO metadata/
+examples/quixbugs/noise_estimates/
