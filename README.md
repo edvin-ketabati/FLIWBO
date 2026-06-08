@@ -1,2 +1,2 @@
 # FLIWBO
-Finite-library Bayesian optimization algorithm, applied to multi-agent system design. 
+Finite-library input warped Bayesian optimization algorithm, applied to multi-agent system design. 
