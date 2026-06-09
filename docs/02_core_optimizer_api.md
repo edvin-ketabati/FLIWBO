@@ -124,7 +124,7 @@ run = FLIWBOOptimizer.resume("runs/my_run")
 proposal = run.ask()
 ```
 
-That returns the same pending proposal. It does not silently invent a new vector.
+That returns the same pending proposal.
 
 ## Durable Run Files
 
