@@ -10,7 +10,8 @@ vector -> MAS spec -> runtime -> tests -> score -> optimizer
 
 ## What The Example Optimizes
 
-The QuixBugs example searches over multi-agent system designs.
+The QuixBugs example searches over multi-agent system designs with the purpose of solving the different bugs in the files.
+Files and tests available at https://github.com/jkoppel/QuixBugs
 
 Each vector encodes up to five agents.
 
