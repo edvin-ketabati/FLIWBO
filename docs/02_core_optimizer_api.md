@@ -35,6 +35,8 @@ x[2] can be 0, 1, 2, 3, or 4
 ```
 
 The optimizer does not know what the choices mean. Your integration decides that.
+The optimizer can relearn the "distance" between two choices, but not the ordering.
+So, make sure the ordering reflects the real and intended structure.
 
 ## The Objective Function
 
