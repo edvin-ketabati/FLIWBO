@@ -22,13 +22,13 @@ Then FLIWBO learns from the score and proposes the next vector.
 .
 |-- src/fliwbo_core/        # the reusable optimizer package
 |-- examples/quixbugs/      # one full integration example
-|-- examples/notebooks/     # visual dry-run demos
-|-- docs/                   # step-by-step handoff docs
+|-- examples/notebooks/     # visual demo of hyperparameters
+|-- docs/                   # step-by-step docs
 |-- pyproject.toml          # package metadata
 `-- requirements.txt        # pinned development environment snapshot
 ```
 
-The core package does not know about QuixBugs, LLMs, tools, agents, Docker, or
+The core package does not know about QuixBugs, LLMs, tools, agents, or
 API keys. It only knows about integer vectors and scalar scores.
 
 The QuixBugs folder shows one way to connect those integer vectors to a real
@@ -52,7 +52,7 @@ multi-agent runtime and evaluation loop.
    score.
 
 5. [Hyperparameter Effects](docs/05_hyperparameter_effects.md)
-   Explains the optimizer knobs and links to the visual notebook demo.
+   Explains the optimizer settings and links to the visual notebook demo.
 
 ## Quick Install
 
@@ -75,7 +75,7 @@ pip install -e ".[notebooks]"
 python -m notebook examples/notebooks/01_hyperparameter_visualization.ipynb
 ```
 
-## Tiny Core Example
+## Core Example
 
 ```python
 import numpy as np
