@@ -117,8 +117,8 @@ score = -loss
 
 ## Step 5: Use Ask/Tell For Expensive Runs
 
-If your evaluation takes a long time, do not hide everything inside one giant
-function call. Use ask/tell.
+If your evaluation takes a long time, you might want each iteration written to disk in case of a crash or error.
+In that case, use ask/tell.
 
 ```python
 run = optimizer.start(X_init, y_init, run_dir="runs/customer_system_001")
