@@ -191,15 +191,3 @@ your vector bounds are correct
 ```
 
 Only after that should you connect expensive runtimes.
-
-## Integration Checklist
-
-```text
-[ ] I know what each vector coordinate means.
-[ ] I know each coordinate's number of choices.
-[ ] I have seed vectors and seed scores.
-[ ] I can decode one vector into one runnable design.
-[ ] I can evaluate one design and return one number.
-[ ] I can run ask/tell with a durable run_dir.
-[ ] I can resume a pending proposal after a simulated crash.
-```
