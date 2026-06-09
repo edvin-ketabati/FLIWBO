@@ -27,6 +27,10 @@ quixbugs = [
     "python-dotenv>=1.0",
     "sentence-transformers>=5.0",
 ]
+notebooks = [
+    "matplotlib>=3.8",
+    "notebook>=7.0",
+]
 dev = [
     "pytest>=9.0",
 ]

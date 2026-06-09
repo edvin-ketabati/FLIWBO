@@ -35,11 +35,17 @@ def optimize_warp_coordinatewise(
     gpr_template,
     one_dim_warp_pairs: list[tuple[float, float]],
     prior_weight: float,
+    prior_tau: float = 0.75,
     n_sweeps: int = 1,
     n_jobs: int = -1,
     initial_indices: np.ndarray | None = None,
 ) -> CoordinateWarpSearchResult:
-    """Choose a factorized warp from the finite one-dimensional warp library."""
+    """
+    Choose a factorized warp from the finite one-dimensional warp library.
+
+    prior_weight multiplies the unity-warp log prior in the scoring objective.
+    prior_tau controls the width of that prior around alpha=beta=1.
+    """
 
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float).ravel()
@@ -70,6 +76,7 @@ def optimize_warp_coordinatewise(
                 y,
                 gpr_template,
                 prior_weight,
+                prior_tau,
                 n_jobs,
             )
             n_scored += len(results)
@@ -85,6 +92,7 @@ def optimize_warp_coordinatewise(
         y,
         gpr_template,
         prior_weight,
+        prior_tau,
     )
     n_scored += 1
 
@@ -123,15 +131,20 @@ def fit_and_score_warp(
     y: np.ndarray,
     gpr_template,
     prior_weight: float,
+    prior_tau: float = 0.75,
 ) -> tuple[float, object]:
-    """Fit a cloned GP on warped inputs and return its score and model."""
+    """
+    Fit a cloned GP on warped inputs and return its score and model.
+
+    The score is GP log marginal likelihood plus the weighted unity-warp prior.
+    """
 
     Z = beta_warp_nd(X, alpha_vec, beta_vec)
     gpr = clone(gpr_template)
     gpr.fit(Z, y)
 
     lml = float(gpr.log_marginal_likelihood_value_)
-    log_prior = log_prior_unity_weak(alpha_vec, beta_vec)
+    log_prior = log_prior_unity_weak(alpha_vec, beta_vec, tau=prior_tau)
     score = lml + prior_weight * log_prior
     return float(score), gpr
 
@@ -145,6 +158,7 @@ def _score_coordinate_candidate(
     y: np.ndarray,
     gpr_template,
     prior_weight: float,
+    prior_tau: float,
 ) -> tuple[int, float]:
     candidate_indices = current_indices.copy()
     candidate_indices[coord_idx] = candidate_pair_idx
@@ -157,6 +171,7 @@ def _score_coordinate_candidate(
         y,
         gpr_template,
         prior_weight,
+        prior_tau,
     )
     return candidate_pair_idx, score
 
@@ -170,6 +185,7 @@ def _score_coordinate_candidates(
     y: np.ndarray,
     gpr_template,
     prior_weight: float,
+    prior_tau: float,
     n_jobs: int,
 ) -> list[tuple[int, float]]:
     if n_jobs == 1:
@@ -183,6 +199,7 @@ def _score_coordinate_candidates(
                 y,
                 gpr_template,
                 prior_weight,
+                prior_tau,
             )
             for candidate_pair_idx in candidate_pair_indices
         ]
@@ -198,6 +215,7 @@ def _score_coordinate_candidates(
                 y,
                 gpr_template,
                 prior_weight,
+                prior_tau,
             )
             for candidate_pair_idx in candidate_pair_indices
         )
@@ -212,6 +230,7 @@ def _score_coordinate_candidates(
             y,
             gpr_template,
             prior_weight,
+            prior_tau,
             n_jobs=1,
         )
 

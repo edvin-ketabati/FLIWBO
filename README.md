@@ -22,6 +22,7 @@ Then FLIWBO learns from the score and proposes the next vector.
 .
 |-- src/fliwbo_core/        # the reusable optimizer package
 |-- examples/quixbugs/      # one full integration example
+|-- examples/notebooks/     # visual dry-run demos
 |-- docs/                   # step-by-step handoff docs
 |-- pyproject.toml          # package metadata
 `-- requirements.txt        # pinned development environment snapshot
@@ -50,6 +51,9 @@ multi-agent runtime and evaluation loop.
    Explains the example integration in this repo, from vector to MAS spec to
    score.
 
+5. [Hyperparameter Effects](docs/05_hyperparameter_effects.md)
+   Explains the optimizer knobs and links to the visual notebook demo.
+
 ## Quick Install
 
 From the repository root:
@@ -62,6 +66,13 @@ For the QuixBugs example dependencies:
 
 ```bash
 pip install -e ".[quixbugs]"
+```
+
+For the visual hyperparameter notebook:
+
+```bash
+pip install -e ".[notebooks]"
+python -m notebook examples/notebooks/01_hyperparameter_visualization.ipynb
 ```
 
 ## Tiny Core Example
@@ -89,6 +100,8 @@ y_init = np.array([objective(x) for x in X_init])
 
 config = FLIWBOConfig(
     n_iters=10,
+    warp_prior_weight=0.005,
+    warp_prior_tau=0.75,
     pr_config=PROptimizerConfig(
         num_restarts=5,
         num_steps=10,

@@ -25,8 +25,12 @@ N_ITERS = 158
 # Beta scaling
 BETA_SCALING = 10
 
-# Whether to use the unity warp prior
+# Whether to use the unity warp prior.
+# The prior is centered on alpha=beta=1 for every coordinate, which is the
+# identity/no-warp Beta-CDF transform.
 USE_WARP_PRIOR = True
+WARP_UNITY_PRIOR_WEIGHT = 0.005
+WARP_UNITY_PRIOR_TAU = 0.75
 
 # Epsilon for warp library construction (resolution of the grid)
 EPSILON_WARP = 3.0

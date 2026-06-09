@@ -43,10 +43,12 @@ def make_warp_library(
     dim=None,
 ):
     """
-    Build an epsilon-net over the compact parameter box [alpha_min, alpha_max] x [beta_min, beta_max].
+    Build an epsilon-net over [alpha_min, alpha_max] x [beta_min, beta_max].
 
-    The grid spacing is chosen so that every point in the box is within Euclidean distance epsilon
-    of at least one library element.
+    The grid spacing is chosen so that every point in the box is within
+    Euclidean distance epsilon of at least one library element. The exact unity
+    warp (alpha=beta=1) is always included so the identity transform is
+    available to the finite-library search.
     """
     step = epsilon / np.sqrt(2.0)
 
@@ -57,9 +59,12 @@ def make_warp_library(
     beta_values = np.linspace(beta_min, beta_max, n_beta)
 
     if dim is None:
-        return [(float(alpha), float(beta)) for alpha in alpha_values for beta in beta_values]
+        library = [(float(alpha), float(beta)) for alpha in alpha_values for beta in beta_values]
+        if not any(np.isclose(alpha, 1.0) and np.isclose(beta, 1.0) for alpha, beta in library):
+            library.append((1.0, 1.0))
+        return library
 
-    return [
+    library = [
         (
             np.full(dim, float(alpha), dtype=float),
             np.full(dim, float(beta), dtype=float),
@@ -67,6 +72,9 @@ def make_warp_library(
         for alpha in alpha_values
         for beta in beta_values
     ]
+    if not any(np.allclose(alpha, 1.0) and np.allclose(beta, 1.0) for alpha, beta in library):
+        library.append((np.ones(dim, dtype=float), np.ones(dim, dtype=float)))
+    return library
 
 
 def gamma_t(t, dim = 1 , nu = 2.5, c_gamma = 1.5, log_power = 1):
@@ -81,9 +89,16 @@ def beta_t(t, N_eps, delta = 0.1, Cwarp = 1):
     return (2 * (Cwarp ** 2) + 300.0 * gamma_t(t) * (np.log(t * N_eps / delta) ** 3))/BETA_SCALING
 
 
-# Larger tau means weaker prior
 def log_prior_unity_weak(a, b, tau=0.75):
-    """Weak log prior that mildly favors the identity-like warp alpha=beta=1."""
+    """
+    Log prior centered on the unity warp alpha=beta=1.
+
+    A Beta-CDF warp with alpha=beta=1 is the identity/no-warp transform. The
+    prior is Gaussian in log(alpha) and log(beta), so larger tau makes the prior
+    wider and weaker while smaller tau penalizes deviations from unity more.
+    The optimizer multiplies this value by warp_prior_weight, so the effective
+    quadratic penalty strength is proportional to warp_prior_weight / tau**2.
+    """
 
     la = np.log(a)
     lb = np.log(b)

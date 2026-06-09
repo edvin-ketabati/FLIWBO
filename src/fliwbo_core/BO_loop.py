@@ -16,6 +16,8 @@ from .BO_config import (
     N_ITERS,
     OBS_NOISE,
     USE_WARP_PRIOR,
+    WARP_UNITY_PRIOR_TAU,
+    WARP_UNITY_PRIOR_WEIGHT,
 )
 from .BO_utils import beta_t
 from .optimizer import (
@@ -37,6 +39,8 @@ def run_bo_warped(
     noise_std=OBS_NOISE,
     lengthscale=LENGTHSCALE,
     use_warp_prior=USE_WARP_PRIOR,
+    warp_prior_weight=WARP_UNITY_PRIOR_WEIGHT,
+    warp_prior_tau=WARP_UNITY_PRIOR_TAU,
     choice_sizes: list[int] | None = None,
     pr_config: PROptimizerConfig | None = None,
     pr_seed: int | None = None,
@@ -59,6 +63,8 @@ def run_bo_warped(
         noise_std=noise_std,
         lengthscale=lengthscale,
         use_warp_prior=use_warp_prior,
+        warp_prior_weight=warp_prior_weight,
+        warp_prior_tau=warp_prior_tau,
         pr_config=pr_config or default_pr_config(),
         pr_seed=pr_seed,
         log_csv=True,

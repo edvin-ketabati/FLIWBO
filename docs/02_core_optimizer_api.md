@@ -81,6 +81,8 @@ y_init = np.array([objective(x) for x in X_init])
 
 config = FLIWBOConfig(
     n_iters=10,
+    warp_prior_weight=0.005,
+    warp_prior_tau=0.75,
     pr_config=PROptimizerConfig(
         num_restarts=5,
         num_steps=10,
@@ -170,7 +172,9 @@ n_iters              number of BO iterations
 noise_std            assumed objective noise
 lengthscale          base GP kernel lengthscale
 epsilon_warp         resolution of the finite warp library
-use_warp_prior       whether to favor near-identity warps
+use_warp_prior       whether to favor unity warps
+warp_prior_weight    strength of the prior toward alpha=beta=1
+warp_prior_tau       width of the prior around alpha=beta=1
 warp_search_sweeps   coordinate-wise warp search sweeps
 warp_search_n_jobs   parallel workers for warp scoring
 pr_config            settings for acquisition search over integer vectors
@@ -178,3 +182,76 @@ pr_config            settings for acquisition search over integer vectors
 
 For a first integration, change as little as possible. Start with small
 `n_iters`, small `PROptimizerConfig`, and a deterministic dry-run objective.
+
+## The Warp Prior
+
+The warp is a Beta-CDF transform applied to each normalized input coordinate.
+
+Each coordinate gets two warp parameters:
+
+```text
+alpha
+beta
+```
+
+When:
+
+```text
+alpha = 1
+beta = 1
+```
+
+the Beta-CDF warp is the identity transform. In plain words, this is the
+unity warp: no input stretching, no input squeezing, and no change to the
+distances the base GP sees. The finite warp library always includes this exact
+unity warp.
+
+The warp prior is a soft preference for that unity warp.
+
+```python
+config = FLIWBOConfig(
+    use_warp_prior=True,
+    warp_prior_weight=0.005,
+    warp_prior_tau=0.75,
+)
+```
+
+The optimizer scores each candidate warp like this:
+
+```text
+warp score = GP log marginal likelihood + warp_prior_weight * log_prior
+```
+
+The `log_prior` is highest at `alpha=beta=1`. It becomes more negative as
+`alpha` and `beta` move away from 1.
+
+Use the prior as a brake on aggressive warps:
+
+```text
+higher warp_prior_weight = stronger pull toward unity
+lower warp_prior_weight  = more freedom to choose strong warps
+warp_prior_weight = 0    = no practical prior penalty
+```
+
+Tune `warp_prior_weight` and `warp_prior_tau` as a pair. In the current
+implementation, candidate ranking depends on the effective prior strength:
+
+```text
+warp_prior_weight / warp_prior_tau^2
+```
+
+Lower effective strength gives the warp search more freedom. Higher effective
+strength pulls harder toward unity. Too much regularization can keep the model
+too close to the no-warp case.
+
+You can disable the prior with either:
+
+```python
+FLIWBOConfig(use_warp_prior=False)
+```
+
+or:
+
+```python
+FLIWBOConfig(warp_prior_weight=0.0)
+```

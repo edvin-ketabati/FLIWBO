@@ -39,6 +39,8 @@ from .BO_config import (
     PR_TAU_INIT,
     PR_TAU_MIN,
     USE_WARP_PRIOR,
+    WARP_UNITY_PRIOR_TAU,
+    WARP_UNITY_PRIOR_WEIGHT,
     WARP_SEARCH_N_JOBS,
     WARP_SEARCH_SWEEPS,
     Y_CENTER,
@@ -93,6 +95,12 @@ class FLIWBOConfig:
     The defaults are tuned for the current QuixBugs-style experiments, but the
     object is deliberately domain-neutral. Users can pass different values for
     synthetic tests, cheaper smoke runs, or high-value production runs.
+
+    The warp prior is centered on the unity warp alpha=beta=1. Increase
+    warp_prior_weight to resist aggressive warps, or increase warp_prior_tau to
+    make the prior wider and easier to move away from unity. For the current
+    quadratic log-prior penalty, the effective strength is proportional to
+    warp_prior_weight / warp_prior_tau**2.
     """
 
     n_iters: int = N_ITERS
@@ -109,6 +117,8 @@ class FLIWBOConfig:
     log_csv: bool = False
     metadata_dir: str | Path | None = None
     verbose: bool = False
+    warp_prior_weight: float = WARP_UNITY_PRIOR_WEIGHT
+    warp_prior_tau: float = WARP_UNITY_PRIOR_TAU
 
 
 @dataclass(frozen=True)
@@ -274,7 +284,7 @@ class FLIWBOOptimizer:
         self._log(f"BO iteration {iteration}/{self.config.n_iters}")
 
         beta_value = float(self.beta_fn(iteration, N_eps=n_full_warp_library))
-        prior_weight = 0.005 if self.config.use_warp_prior else 0.0
+        prior_weight = self.config.warp_prior_weight if self.config.use_warp_prior else 0.0
 
         warp_result = optimize_warp_coordinatewise(
             X=X,
@@ -282,6 +292,7 @@ class FLIWBOOptimizer:
             gpr_template=gpr_template,
             one_dim_warp_pairs=one_dim_warp_pairs,
             prior_weight=prior_weight,
+            prior_tau=self.config.warp_prior_tau,
             n_sweeps=self.config.warp_search_sweeps,
             n_jobs=self.config.warp_search_n_jobs,
         )
@@ -342,6 +353,12 @@ class FLIWBOOptimizer:
             raise ValueError(f"y_scale must be positive, got {self.config.y_scale}")
         if self.config.epsilon_warp <= 0.0:
             raise ValueError(f"epsilon_warp must be positive, got {self.config.epsilon_warp}")
+        if self.config.warp_prior_weight < 0.0:
+            raise ValueError(
+                f"warp_prior_weight must be non-negative, got {self.config.warp_prior_weight}"
+            )
+        if self.config.warp_prior_tau <= 0.0:
+            raise ValueError(f"warp_prior_tau must be positive, got {self.config.warp_prior_tau}")
 
     def _resolve_run_dir(self, run_dir: str | Path | None) -> Path | None:
         if run_dir is not None:
