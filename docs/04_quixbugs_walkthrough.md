@@ -143,7 +143,8 @@ into:
 examples/quixbugs/workdirs/<system-name>/
 ```
 
-Each evaluation gets a clean editable workspace.
+Each evaluation gets a clean editable workspace. 
+However, for the first run, you will need to download the files from the QuixBugs repo (linked at the beginning) and create the directories.
 
 ## Step 6: Build And Run The MAS
 
