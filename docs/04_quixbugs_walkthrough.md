@@ -261,7 +261,7 @@ examples/quixbugs/noise_estimates/
 
 ## What To Copy For A New Example
 
-For a new benchmark or partner integration, copy the pattern, not necessarily the
+For a new benchmark or integration, copy the pattern, not necessarily the
 files.
 
 You usually need equivalents of:
