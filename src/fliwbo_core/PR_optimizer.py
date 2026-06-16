@@ -1,14 +1,14 @@
-"""Probabilistic reparameterization search over discrete vectors.
+"""Probabilistic reparameterization search over typed vectors.
 
-FLIWBO uses this module to maximize the acquisition function over a product of
-categorical choices. It samples integer vectors, estimates which choices look
-good, and keeps the best vector found across restarts.
+FLIWBO uses this module to maximize the acquisition function over mixed spaces.
+Discrete coordinates are represented by factorized categorical distributions;
+continuous coordinates are optimized directly in the warped GP-input domain.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable, Sequence
 
 import numpy as np
 import torch
@@ -17,7 +17,7 @@ import torch.optim as optim
 
 @dataclass(frozen=True)
 class PROptimizerConfig:
-    """Knobs for acquisition-function optimization over the discrete space."""
+    """Knobs for acquisition-function optimization using PR."""
 
     num_restarts: int = 20
     num_steps: int = 30
@@ -28,16 +28,77 @@ class PROptimizerConfig:
     tau_min: float = 0.01
 
 
+@dataclass(frozen=True)
+class PRDimension:
+    """One coordinate in the PR acquisition optimizer."""
+
+    kind: str
+    warped_choices: tuple[float, ...] = ()
+    warped_bounds: tuple[float, float] | None = None
+
+    @classmethod
+    def discrete(cls, warped_choices: Sequence[float]) -> "PRDimension":
+        choices = tuple(float(value) for value in warped_choices)
+        if not choices:
+            raise ValueError("Discrete PR dimensions must contain at least one choice")
+        return cls(kind="discrete", warped_choices=choices)
+
+    @classmethod
+    def continuous(cls, warped_bounds: tuple[float, float]) -> "PRDimension":
+        lower, upper = (float(warped_bounds[0]), float(warped_bounds[1]))
+        if not lower < upper:
+            raise ValueError(f"Continuous PR bounds must satisfy lower < upper, got {lower}, {upper}")
+        return cls(kind="continuous", warped_bounds=(lower, upper))
+
+
+class TorchGaussianProcessUCB:
+    """Differentiable UCB mirror for the fitted sklearn GP."""
+
+    def __init__(self, gpr: Any, beta_value: float):
+        matern_kernel, noise_level = _extract_matern25_and_noise(gpr.kernel_)
+        self.X_train = torch.as_tensor(gpr.X_train_, dtype=torch.float64)
+        self.alpha = torch.as_tensor(gpr.alpha_, dtype=torch.float64).reshape(-1)
+        self.L = torch.as_tensor(gpr.L_, dtype=torch.float64)
+        self.length_scale = torch.as_tensor(matern_kernel.length_scale, dtype=torch.float64)
+        self.noise_level = float(noise_level)
+        self.beta_value = float(beta_value)
+        self.y_train_mean = torch.as_tensor(
+            getattr(gpr, "_y_train_mean", 0.0),
+            dtype=torch.float64,
+        ).reshape(-1)[0]
+        self.y_train_std = torch.as_tensor(
+            getattr(gpr, "_y_train_std", 1.0),
+            dtype=torch.float64,
+        ).reshape(-1)[0]
+
+    def __call__(self, Z: torch.Tensor) -> torch.Tensor:
+        if Z.ndim == 1:
+            Z = Z.reshape(1, -1)
+        Z = Z.to(dtype=torch.float64)
+
+        K_trans = _matern25_kernel(Z, self.X_train, self.length_scale)
+        mean = K_trans.matmul(self.alpha)
+
+        v = torch.linalg.solve_triangular(self.L, K_trans.T, upper=False)
+        variance = 1.0 + self.noise_level - torch.sum(v * v, dim=0)
+        variance = torch.clamp(variance, min=0.0)
+
+        mean = self.y_train_std * mean + self.y_train_mean
+        std = self.y_train_std * torch.sqrt(variance)
+        return mean + np.sqrt(self.beta_value) * std
+
+
 class FactorizedProbabilisticReparameterization:
     """
-    REINFORCE-style PR optimizer over a product of categorical variables.
+    PR optimizer over a product of discrete and continuous variables.
 
-    The acquisition callable receives one hard integer vector and returns a scalar.
+    Discrete variables use REINFORCE-style score-function gradients. Continuous
+    variables receive ordinary pathwise gradients through the Torch acquisition.
     """
 
     def __init__(
         self,
-        choice_sizes: list[int],
+        dimensions: Sequence[PRDimension],
         *,
         learning_rate: float = 0.1,
         tau_init: float = 1.0,
@@ -45,40 +106,115 @@ class FactorizedProbabilisticReparameterization:
         tau_min: float = 0.01,
         seed: int | None = None,
     ):
-        if any(size <= 0 for size in choice_sizes):
-            raise ValueError("All categorical choice sizes must be positive")
+        if not dimensions:
+            raise ValueError("PR dimensions must contain at least one coordinate")
 
         if seed is not None:
             torch.manual_seed(seed)
 
-        self.choice_sizes = [int(size) for size in choice_sizes]
-        self.logits = [
-            torch.nn.Parameter(torch.randn(size), requires_grad=True)
-            for size in self.choice_sizes
+        self.dimensions = tuple(dimensions)
+        invalid_kinds = [
+            dimension.kind for dimension in self.dimensions
+            if dimension.kind not in {"discrete", "continuous"}
         ]
-        self.optimizer = optim.Adam(self.logits, lr=learning_rate)
+        if invalid_kinds:
+            raise ValueError(f"Unknown PR dimension kind(s): {invalid_kinds}")
+        for dimension in self.dimensions:
+            if dimension.kind == "discrete" and not dimension.warped_choices:
+                raise ValueError("Discrete PR dimensions must contain at least one choice")
+            if dimension.kind == "continuous" and dimension.warped_bounds is None:
+                raise ValueError("Continuous PR dimensions must include warped_bounds")
+
+        self.dimension = len(self.dimensions)
+        self.discrete_positions = [
+            idx for idx, dimension in enumerate(self.dimensions)
+            if dimension.kind == "discrete"
+        ]
+        self.continuous_positions = [
+            idx for idx, dimension in enumerate(self.dimensions)
+            if dimension.kind == "continuous"
+        ]
+        self.logits = [
+            torch.nn.Parameter(torch.randn(len(self.dimensions[idx].warped_choices), dtype=torch.float64))
+            for idx in self.discrete_positions
+        ]
+        self.discrete_warped_choices = [
+            torch.as_tensor(self.dimensions[idx].warped_choices, dtype=torch.float64)
+            for idx in self.discrete_positions
+        ]
+
+        self.continuous_lower: torch.Tensor | None = None
+        self.continuous_upper: torch.Tensor | None = None
+        self.continuous_unconstrained: torch.nn.Parameter | None = None
+        if self.continuous_positions:
+            bounds = [
+                self.dimensions[idx].warped_bounds
+                for idx in self.continuous_positions
+            ]
+            lower = torch.tensor([bound[0] for bound in bounds if bound is not None], dtype=torch.float64)
+            upper = torch.tensor([bound[1] for bound in bounds if bound is not None], dtype=torch.float64)
+            init_unit = torch.rand(len(self.continuous_positions), dtype=torch.float64).clamp(1e-6, 1.0 - 1e-6)
+            self.continuous_lower = lower
+            self.continuous_upper = upper
+            self.continuous_unconstrained = torch.nn.Parameter(torch.logit(init_unit))
+
+        parameters: list[torch.nn.Parameter] = list(self.logits)
+        if self.continuous_unconstrained is not None:
+            parameters.append(self.continuous_unconstrained)
+        self.optimizer = optim.Adam(parameters, lr=learning_rate)
         self.tau = tau_init
         self.tau_decay = tau_decay
         self.tau_min = tau_min
 
-    def sample(self, num_samples: int) -> tuple[torch.Tensor, torch.Tensor]:
-        columns = []
-        log_prob_columns = []
+    def sample(self, num_samples: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        z = torch.empty((num_samples, self.dimension), dtype=torch.float64)
+        x_pr = torch.empty((num_samples, self.dimension), dtype=torch.float64)
+        log_probs = torch.zeros(num_samples, dtype=torch.float64)
 
-        for logits in self.logits:
+        for logits, warped_choices, dim_idx in zip(
+            self.logits,
+            self.discrete_warped_choices,
+            self.discrete_positions,
+        ):
             probabilities = torch.nn.functional.softmax(logits / self.tau, dim=0)
             distribution = torch.distributions.Categorical(probabilities)
             samples = distribution.sample((num_samples,))
-            columns.append(samples)
-            log_prob_columns.append(distribution.log_prob(samples))
+            z[:, dim_idx] = warped_choices[samples]
+            x_pr[:, dim_idx] = samples.to(dtype=torch.float64)
+            log_probs = log_probs + distribution.log_prob(samples)
 
-        sample_matrix = torch.stack(columns, dim=1)
-        log_probs = torch.stack(log_prob_columns, dim=1).sum(dim=1)
-        return sample_matrix, log_probs
+        continuous_z = self._continuous_z()
+        if continuous_z is not None:
+            for local_idx, dim_idx in enumerate(self.continuous_positions):
+                z[:, dim_idx] = continuous_z[local_idx]
+                x_pr[:, dim_idx] = continuous_z[local_idx]
+
+        return z, x_pr, log_probs
+
+    def modal_candidate(self) -> tuple[torch.Tensor, torch.Tensor]:
+        z = torch.empty(self.dimension, dtype=torch.float64)
+        x_pr = torch.empty(self.dimension, dtype=torch.float64)
+
+        for logits, warped_choices, dim_idx in zip(
+            self.logits,
+            self.discrete_warped_choices,
+            self.discrete_positions,
+        ):
+            choice_idx = int(torch.argmax(logits).item())
+            z[dim_idx] = warped_choices[choice_idx]
+            x_pr[dim_idx] = float(choice_idx)
+
+        continuous_z = self._continuous_z()
+        if continuous_z is not None:
+            for local_idx, dim_idx in enumerate(self.continuous_positions):
+                z[dim_idx] = continuous_z[local_idx]
+                x_pr[dim_idx] = continuous_z[local_idx]
+
+        return z, x_pr
 
     def optimize_acquisition(
         self,
-        acquisition: Callable[[np.ndarray], float],
+        acquisition: Callable[[torch.Tensor], torch.Tensor],
         *,
         num_steps: int,
         num_samples: int,
@@ -89,48 +225,65 @@ class FactorizedProbabilisticReparameterization:
         for _ in range(num_steps):
             self.optimizer.zero_grad()
 
-            samples, log_probs = self.sample(num_samples)
-            samples_np = samples.detach().cpu().numpy()
-            values_np = np.asarray(
-                [float(acquisition(row)) for row in samples_np],
-                dtype=np.float32,
-            )
+            z_samples, x_pr_samples, log_probs = self.sample(num_samples)
+            values = acquisition(z_samples)
+            if values.ndim != 1 or values.shape[0] != num_samples:
+                raise ValueError(
+                    f"Acquisition must return shape {(num_samples,)}, got {tuple(values.shape)}"
+                )
 
-            values = torch.tensor(values_np, dtype=torch.float32)
-            baseline = values.mean()
-            loss = -torch.mean(log_probs * (values - baseline))
+            baseline = values.detach().mean()
+            score_term = torch.mean(log_probs * (values.detach() - baseline))
+            loss = -values.mean() - score_term
             loss.backward()
             self.optimizer.step()
 
             self.tau = max(self.tau_min, self.tau * self.tau_decay)
 
+            values_np = values.detach().cpu().numpy()
             best_idx = int(np.argmax(values_np))
             if float(values_np[best_idx]) > best_value:
                 best_value = float(values_np[best_idx])
-                best_x = samples_np[best_idx].astype(int)
+                best_x = x_pr_samples.detach().cpu().numpy()[best_idx]
+
+        modal_z, modal_x_pr = self.modal_candidate()
+        modal_value = float(acquisition(modal_z.reshape(1, -1)).detach().cpu().numpy()[0])
+        if modal_value > best_value:
+            best_value = modal_value
+            best_x = modal_x_pr.detach().cpu().numpy()
 
         if best_x is None:
             raise RuntimeError("PR optimization did not produce any candidate")
 
         return best_x, best_value
 
+    def _continuous_z(self) -> torch.Tensor | None:
+        if self.continuous_unconstrained is None:
+            return None
+        if self.continuous_lower is None or self.continuous_upper is None:
+            raise RuntimeError("Continuous PR state is incomplete")
+        unit_values = torch.sigmoid(self.continuous_unconstrained)
+        return self.continuous_lower + (self.continuous_upper - self.continuous_lower) * unit_values
+
 
 def optimize_with_restarts(
-    acquisition: Callable[[np.ndarray], float],
-    choice_sizes: list[int],
+    acquisition: Callable[[torch.Tensor], torch.Tensor],
+    dimensions: Sequence[PRDimension] | Sequence[dict[str, Any]],
     config: PROptimizerConfig,
     *,
     seed: int | None = None,
 ) -> tuple[np.ndarray, float]:
     """Run several PR optimizers and return the best vector/value pair found."""
 
+    pr_dimensions = _coerce_pr_dimensions(dimensions)
+    batch_acquisition = _coerce_batch_acquisition(acquisition)
     best_x: np.ndarray | None = None
     best_value = -np.inf
 
     for restart_idx in range(config.num_restarts):
         restart_seed = None if seed is None else seed + restart_idx
         optimizer = FactorizedProbabilisticReparameterization(
-            choice_sizes,
+            pr_dimensions,
             learning_rate=config.learning_rate,
             tau_init=config.tau_init,
             tau_decay=config.tau_decay,
@@ -138,7 +291,7 @@ def optimize_with_restarts(
             seed=restart_seed,
         )
         candidate_x, candidate_value = optimizer.optimize_acquisition(
-            acquisition,
+            batch_acquisition,
             num_steps=config.num_steps,
             num_samples=config.num_samples,
         )
@@ -150,4 +303,74 @@ def optimize_with_restarts(
     if best_x is None:
         raise RuntimeError("PR restarts did not produce any candidate")
 
+    if all(dimension.kind == "discrete" for dimension in pr_dimensions):
+        best_x = np.rint(best_x).astype(int)
     return best_x, best_value
+
+
+def _coerce_pr_dimensions(
+    dimensions: Sequence[PRDimension] | Sequence[dict[str, Any]],
+) -> list[PRDimension]:
+    coerced: list[PRDimension] = []
+    for dimension in dimensions:
+        if isinstance(dimension, PRDimension):
+            coerced.append(dimension)
+        elif isinstance(dimension, dict):
+            if dimension.get("type") == "discrete":
+                coerced.append(PRDimension.discrete(dimension["warped_choices"]))
+            elif dimension.get("type") == "continuous":
+                coerced.append(PRDimension.continuous(tuple(dimension["warped_bounds"])))
+            else:
+                raise ValueError(f"Unknown PR dimension type: {dimension.get('type')!r}")
+        else:
+            raise TypeError(f"Expected PRDimension or dict PR spec, got {type(dimension).__name__}")
+    return coerced
+
+
+def _coerce_batch_acquisition(
+    acquisition: Callable[[torch.Tensor], torch.Tensor],
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    def batch_acquisition(z: torch.Tensor) -> torch.Tensor:
+        values = acquisition(z)
+        if not isinstance(values, torch.Tensor):
+            return torch.as_tensor(values, dtype=torch.float64)
+        return values.to(dtype=torch.float64)
+
+    return batch_acquisition
+
+
+def _matern25_kernel(
+    X: torch.Tensor,
+    Y: torch.Tensor,
+    length_scale: torch.Tensor,
+) -> torch.Tensor:
+    scaled_X = X / length_scale
+    scaled_Y = Y / length_scale
+    distances = torch.cdist(scaled_X, scaled_Y)
+    sqrt5_distances = np.sqrt(5.0) * distances
+    return (1.0 + sqrt5_distances + 5.0 / 3.0 * distances * distances) * torch.exp(
+        -sqrt5_distances
+    )
+
+
+def _extract_matern25_and_noise(kernel: Any) -> tuple[Any, float]:
+    matern_kernel = None
+    noise_level = 0.0
+    stack = [kernel]
+
+    while stack:
+        current = stack.pop()
+        name = type(current).__name__
+        if name == "Matern":
+            matern_kernel = current
+        elif name == "WhiteKernel":
+            noise_level += float(current.noise_level)
+        else:
+            if hasattr(current, "k1") and hasattr(current, "k2"):
+                stack.extend([current.k1, current.k2])
+
+    if matern_kernel is None:
+        raise ValueError("Torch GP mirror requires a fitted sklearn Matern kernel")
+    if not np.isclose(float(matern_kernel.nu), 2.5):
+        raise ValueError(f"Torch GP mirror only supports Matern nu=2.5, got {matern_kernel.nu}")
+    return matern_kernel, noise_level

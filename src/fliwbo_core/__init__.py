@@ -2,7 +2,6 @@
 
 from .optimizer import (
     BOIterationRecord,
-    DiscreteSearchSpace,
     FLIWBOConfig,
     FLIWBOOptimizer,
     OptimizationProposal,
@@ -10,14 +9,17 @@ from .optimizer import (
     OptimizationRun,
 )
 from .PR_optimizer import PROptimizerConfig
+from .search_space import Continuous, Discrete, SearchSpace
 
 __all__ = [
     "BOIterationRecord",
-    "DiscreteSearchSpace",
+    "Continuous",
+    "Discrete",
     "FLIWBOConfig",
     "FLIWBOOptimizer",
     "OptimizationProposal",
     "OptimizationResult",
     "OptimizationRun",
     "PROptimizerConfig",
+    "SearchSpace",
 ]

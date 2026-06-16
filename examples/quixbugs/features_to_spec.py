@@ -1,8 +1,8 @@
 """Convert QuixBugs MAS feature vectors into executable MAS specs.
 
-The optimizer proposes compact integer vectors. This module decodes those
-integers into model names, toolsets, prompts, and agent handoff edges, then
-writes examples/quixbugs/mas_spec.json for the runtime builder.
+This example's SearchSpace uses only Discrete coordinates. The optimizer
+proposes compact choice vectors; this module decodes those choices into model
+names, toolsets, prompts, and agent handoff edges.
 """
 
 import json

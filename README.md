@@ -1,20 +1,32 @@
 # FLIWBO
 
-Finite-library input-warped Bayesian optimization for discrete design spaces.
+Finite-library input-warped Bayesian optimization for typed design spaces.
 
-FLIWBO is a small optimizer package plus one worked example. The optimizer asks:
+FLIWBO is a small optimizer package plus one worked example. It proposes a
+vector, your integration evaluates that vector, and FLIWBO uses the returned
+score to decide what to try next.
 
-```text
-Which integer vector should we try next?
-```
-
-Your system answers:
+The vector can contain:
 
 ```text
-Here is the score for that vector.
+Discrete(k)          one integer choice in 0..k-1
+Continuous(a, b)     one float inside [a, b]
 ```
 
-Then FLIWBO learns from the score and proposes the next vector.
+Acquisition optimization uses one probabilistic reparameterization (PR)
+framework for both discrete and continuous coordinates.
+
+## Project Status / Disclaimer
+
+This repository is shared as the code from my master's thesis project. I was a
+student when I wrote it, and I am not a professional programmer. The repository
+is mainly an attempt to make the work more available to people/organizations who are
+interested in it.
+
+I do not promise active maintenance, support, bug fixes, or help integrating the
+code into other projects. The code may be inefficient, incomplete, or contain
+errors. Please treat it as research/thesis code that is made public in good
+faith, rather than as a polished or production-ready software package.
 
 ## What Is In This Repo
 
@@ -28,10 +40,10 @@ Then FLIWBO learns from the score and proposes the next vector.
 `-- requirements.txt        # pinned development environment snapshot
 ```
 
-The core package does not know about QuixBugs, LLMs, tools, agents, or
-API keys. It only knows about integer vectors and scalar scores.
+The core package does not know about QuixBugs, LLMs, tools, agents, or API keys.
+It only knows about typed vectors and scalar scores.
 
-The QuixBugs folder shows one way to connect those integer vectors to a real
+The QuixBugs folder shows one way to connect discrete vectors to a real
 multi-agent runtime and evaluation loop.
 
 ## Read The Docs In This Order
@@ -80,11 +92,15 @@ python -m notebook examples/notebooks/01_hyperparameter_visualization.ipynb
 ```python
 import numpy as np
 
-from fliwbo_core import DiscreteSearchSpace, FLIWBOConfig, FLIWBOOptimizer
-from fliwbo_core import PROptimizerConfig
+from fliwbo_core import Discrete, FLIWBOConfig, FLIWBOOptimizer, PROptimizerConfig
+from fliwbo_core import SearchSpace
 
 
-search_space = DiscreteSearchSpace([4, 3, 5])
+search_space = SearchSpace([
+    Discrete(4),
+    Discrete(3),
+    Discrete(5),
+])
 
 
 def objective(x_vector) -> float:
@@ -115,6 +131,23 @@ result = optimizer.run(objective, X_init, y_init, run_dir="runs/tiny_example")
 print(result.best_x)
 print(result.best_y)
 ```
+
+Mixed spaces use the same optimizer:
+
+```python
+from fliwbo_core import Continuous, Discrete, SearchSpace
+
+
+search_space = SearchSpace([
+    Discrete(4),
+    Continuous(-1.0, 1.0),
+    Discrete(5),
+])
+```
+
+In proposals, discrete coordinates are plain Python `int` values and continuous
+coordinates are `float` values. In NumPy arrays for mixed runs, all coordinates
+share a float dtype, but discrete entries remain integer-valued.
 
 ## Crash-Resistant Mode
 

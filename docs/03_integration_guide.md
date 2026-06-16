@@ -11,7 +11,7 @@ Your integration does the rest.
 You need to provide:
 
 ```text
-1. A finite design space.
+1. A bounded typed design space.
 2. A way to decode vectors.
 3. A runtime that can build and run the decoded design.
 4. A scoring function that returns one number.
@@ -25,33 +25,36 @@ def objective(x_vector) -> float:
     return score
 ```
 
-## Step 1: Define Choices
+## Step 1: Define The Search Space
 
-First decide what each integer means.
+First decide what each coordinate means.
 
 Example:
 
 ```text
 x[0] = model choice
-x[1] = toolset choice
+x[1] = temperature
 x[2] = prompt choice
 x[3] = next agent choice
 ```
 
-Then decide how many choices each coordinate has:
+Then declare the search space:
 
 ```python
-choice_sizes = [3, 8, 20, 6]
+from fliwbo_core import Continuous, Discrete, SearchSpace
+
+
+search_space = SearchSpace([
+    Discrete(3),           # model choice: 0, 1, or 2
+    Continuous(0.0, 1.0),  # temperature
+    Discrete(20),          # prompt choice: 0..19
+    Discrete(6),           # next agent choice: 0..5
+])
 ```
 
-This means:
-
-```text
-x[0] is in 0..2
-x[1] is in 0..7
-x[2] is in 0..19
-x[3] is in 0..5
-```
+Discrete coordinates are stored in proposals as integers. In NumPy arrays for
+mixed runs, they remain integer-valued. Continuous coordinates are floats inside
+the bounds you declared.
 
 ## Step 2: Decode The Vector
 
@@ -63,7 +66,7 @@ Example:
 def vector_to_spec(x_vector):
     return {
         "model": MODELS[x_vector[0]],
-        "tools": TOOLSETS[x_vector[1]],
+        "temperature": x_vector[1],
         "prompt": PROMPTS[x_vector[2]],
         "next_agent": x_vector[3],
     }

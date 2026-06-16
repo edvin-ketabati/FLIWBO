@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 
 from fliwbo_core.BO_config import N_ITERS
-from fliwbo_core.BO_loop import run_bo_warped
+from fliwbo_core import Discrete, FLIWBOConfig, FLIWBOOptimizer, SearchSpace
 from examples.quixbugs.objective import QuixBugsObjective
-from examples.quixbugs.search_space import get_default_choice_sizes
+from examples.quixbugs.search_space import get_default_search_space
 from examples.quixbugs.resource_statement import MAX_NUMBER_OF_AGENTS, NUMBER_OF_FEATURES_PER_AGENT
 
 
@@ -27,25 +27,28 @@ VECTOR_COLUMNS = [
 
 
 def main() -> None:
-    X_init, y_init, labels = load_initial_observations(DEFAULT_CSV_PATH)
+    search_space = get_default_search_space()
+    X_init, y_init, labels = load_initial_observations(DEFAULT_CSV_PATH, search_space)
     objective = QuixBugsObjective()
-    choice_sizes = get_default_choice_sizes()
 
     print(f"Loaded {len(y_init)} initial BO observations from {DEFAULT_CSV_PATH}")
     for label, y_value in zip(labels, y_init):
         print(f"  {label}: objective_value={y_value:.12g}")
 
-    run_bo_warped(
-        objective_fn=objective,
-        X_init=X_init,
-        y_init=y_init,
+    config = FLIWBOConfig(
         n_iters=N_ITERS,
-        choice_sizes=choice_sizes,
         metadata_dir=DEFAULT_METADATA_DIR,
+        log_csv=True,
+        verbose=True,
     )
+    optimizer = FLIWBOOptimizer(search_space, config=config)
+    optimizer.run(objective, X_init, y_init)
 
 
-def load_initial_observations(csv_path: Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
+def load_initial_observations(
+    csv_path: Path,
+    search_space: SearchSpace,
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """
     Read initial BO seed observations from CSV.
 
@@ -75,7 +78,6 @@ def load_initial_observations(csv_path: Path) -> tuple[np.ndarray, np.ndarray, l
             f"CSV is missing {OBJECTIVE_COLUMN!r}. Run evaluate_initial_x_points.py first."
         )
 
-    choice_sizes = get_default_choice_sizes()
     expected_length = MAX_NUMBER_OF_AGENTS * NUMBER_OF_FEATURES_PER_AGENT
 
     x_rows: list[list[int]] = []
@@ -85,7 +87,7 @@ def load_initial_observations(csv_path: Path) -> tuple[np.ndarray, np.ndarray, l
     for row_index, row in enumerate(rows, start=1):
         label = (row.get(LABEL_COLUMN) or f"row_{row_index}").strip()
         x_vector = _row_to_feature_vector(row, row_index, expected_length)
-        _validate_feature_bounds(x_vector, choice_sizes, row_index)
+        _validate_feature_bounds(x_vector, search_space, row_index)
 
         raw_objective = (row.get(OBJECTIVE_COLUMN) or "").strip()
         if raw_objective == "":
@@ -137,18 +139,18 @@ def _row_to_feature_vector(
 
 def _validate_feature_bounds(
     x_vector: list[int],
-    choice_sizes: list[int],
+    search_space: SearchSpace,
     row_index: int,
 ) -> None:
-    if len(x_vector) != len(choice_sizes):
+    if len(x_vector) != search_space.dimension:
         raise ValueError(
-            f"Row {row_index} has {len(x_vector)} values, expected {len(choice_sizes)}"
+            f"Row {row_index} has {len(x_vector)} values, expected {search_space.dimension}"
         )
 
     out_of_bounds = [
-        (column, value, size)
-        for column, value, size in zip(VECTOR_COLUMNS, x_vector, choice_sizes)
-        if value < 0 or value >= size
+        (column, value, variable.num_choices)
+        for column, value, variable in zip(VECTOR_COLUMNS, x_vector, search_space.variables)
+        if isinstance(variable, Discrete) and (value < 0 or value >= variable.num_choices)
     ]
     if out_of_bounds:
         details = ", ".join(

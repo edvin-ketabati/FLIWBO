@@ -1,9 +1,10 @@
-"""Choice-size helper for the QuixBugs MAS design vector."""
+"""Search-space declaration for the QuixBugs MAS design vector."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from fliwbo_core import Discrete, SearchSpace
 from fliwbo_core.decoder import ResourceDecoder
 
 from .resource_statement import (
@@ -19,8 +20,8 @@ QUIXBUGS_DIR = Path(__file__).resolve().parent
 ENCODING_MAP_PATH = QUIXBUGS_DIR / "encoding_map.json"
 
 
-def get_default_choice_sizes() -> list[int]:
-    """Return the per-coordinate number of choices for the 20-value MAS vector."""
+def get_default_search_space() -> SearchSpace:
+    """Return the typed search space for the 20-value MAS vector."""
 
     decoder = ResourceDecoder.from_json(
         ENCODING_MAP_PATH,
@@ -29,16 +30,16 @@ def get_default_choice_sizes() -> list[int]:
         SYSTEM_PROMPTS,
     )
 
-    per_agent_choice_sizes = [
-        decoder.n_llm_choices,
-        decoder.n_toolset_choices,
-        decoder.n_prompt_choices,
-        MAX_NUMBER_OF_AGENTS + 1,
+    per_agent_variables = [
+        Discrete(decoder.n_llm_choices),
+        Discrete(decoder.n_toolset_choices),
+        Discrete(decoder.n_prompt_choices),
+        Discrete(MAX_NUMBER_OF_AGENTS + 1),
     ]
 
-    if len(per_agent_choice_sizes) != NUMBER_OF_FEATURES_PER_AGENT:
+    if len(per_agent_variables) != NUMBER_OF_FEATURES_PER_AGENT:
         raise ValueError(
             "NUMBER_OF_FEATURES_PER_AGENT must match the configured MAS feature layout"
         )
 
-    return per_agent_choice_sizes * MAX_NUMBER_OF_AGENTS
+    return SearchSpace(per_agent_variables * MAX_NUMBER_OF_AGENTS)

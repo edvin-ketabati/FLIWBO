@@ -1,7 +1,8 @@
 """Build the QuixBugs resource encoding map.
 
-The optimizer sees only integers. This script orders LLMs, toolsets, and prompts
-so those integers have a useful neighborhood structure for BO.
+The QuixBugs SearchSpace uses discrete coordinates. This script orders LLMs,
+toolsets, and prompts so nearby choices have a useful neighborhood structure
+for BO.
 """
 
 from __future__ import annotations

@@ -1,14 +1,14 @@
 """Default configuration constants for the FLIWBO package.
 
 Most users should pass FLIWBOConfig instead of editing this file directly. These
-values exist as shared defaults and to keep older scripts working.
+values exist as shared defaults for the reusable optimizer and examples.
 """
 
 # Lengthscale for base kernel k_0:
 LENGTHSCALE = 0.35
 
 # Boundary margin for the BO model input domain.
-# Discrete choices are mapped from their raw integer indices into [X_DOMAIN_TAU, 1 - X_DOMAIN_TAU]^D.
+# Raw search-space coordinates are mapped into [X_DOMAIN_TAU, 1 - X_DOMAIN_TAU]^D.
 X_DOMAIN_TAU = 0.02
 
 # Observation noise

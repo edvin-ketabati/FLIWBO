@@ -1,8 +1,8 @@
 """QuixBugs objective adapter.
 
 This is the bridge between the pure optimizer and the QuixBugs example runtime.
-It receives an integer vector, builds the corresponding MAS, evaluates that MAS,
-and returns one scalar score.
+It receives a discrete typed vector, builds the corresponding MAS, evaluates
+that MAS, and returns one scalar score.
 """
 
 from __future__ import annotations

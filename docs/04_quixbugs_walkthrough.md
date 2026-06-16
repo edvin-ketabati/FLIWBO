@@ -21,10 +21,10 @@ Each agent uses four values:
 [llm_choice, toolset_choice, prompt_choice, next_agent]
 ```
 
-For five agents, the vector has twenty values:
+For five agents, the vector has twenty discrete values:
 
 ```text
-5 agents * 4 values = 20 integers
+5 agents * 4 values = 20 discrete coordinates
 ```
 
 ## Step 1: Declare The Design Space
@@ -62,9 +62,9 @@ Output:
 examples/quixbugs/encoding_map.json
 ```
 
-The encoding map decides which integer points to which LLM, toolset, and prompt.
-It tries to put similar choices near each other so the optimizer has a smoother
-space to explore.
+The encoding map decides which discrete choice points to which LLM, toolset,
+and prompt. It tries to put similar choices near each other so the optimizer
+has a smoother space to explore.
 
 After editing `resource_statement.py`, rebuild it:
 
@@ -72,7 +72,7 @@ After editing `resource_statement.py`, rebuild it:
 python -m examples.quixbugs.run_encoding
 ```
 
-## Step 3: Compute Choice Sizes
+## Step 3: Build The Search Space
 
 File:
 
@@ -80,14 +80,14 @@ File:
 examples/quixbugs/search_space.py
 ```
 
-This gives the optimizer the list of valid sizes for the 20-vector.
+This returns a `SearchSpace` made of 20 `Discrete(...)` coordinates.
 
 Example:
 
 ```python
-from examples.quixbugs.search_space import get_default_choice_sizes
+from examples.quixbugs.search_space import get_default_search_space
 
-choice_sizes = get_default_choice_sizes()
+search_space = get_default_search_space()
 ```
 
 ## Step 4: Convert Vector To MAS Spec
@@ -143,8 +143,8 @@ into:
 examples/quixbugs/workdirs/<system-name>/
 ```
 
-Each evaluation gets a clean editable workspace. 
-However, for the first run, you will need to download the files from the QuixBugs repo (linked at the beginning) and create the directories.
+Each evaluation gets a clean editable workspace. For the first run, download
+the files from the QuixBugs repo linked above and create the directories.
 
 ## Step 6: Build And Run The MAS
 

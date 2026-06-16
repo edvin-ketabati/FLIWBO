@@ -20,7 +20,7 @@ library change as the optimizer knobs move.
 FLIWBO does three things at each BO iteration:
 
 ```text
-1. Normalize the observed integer vectors into [0, 1]^D.
+1. Normalize the observed typed vectors into [0, 1]^D.
 2. Choose one input warp from a finite warp library.
 3. Fit a GP on the warped inputs and optimize the acquisition function.
 ```
@@ -127,7 +127,9 @@ let joblib use available workers.
 ## Acquisition Search Knobs
 
 The `pr_config` object controls the probabilistic reparameterization optimizer
-used to search over integer vectors.
+used to search over typed vectors. Discrete coordinates are optimized through
+factorized categorical distributions; continuous coordinates are optimized
+directly in the warped GP-input domain.
 
 ```text
 num_restarts

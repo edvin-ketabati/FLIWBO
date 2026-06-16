@@ -5,7 +5,7 @@ This page explains the reusable optimizer.
 The optimizer needs three things:
 
 ```text
-1. choice_sizes
+1. search_space
 2. X_init
 3. y_init
 ```
@@ -18,25 +18,38 @@ objective score for the proposed vector
 
 ## The Vector
 
-FLIWBO works on integer vectors.
+FLIWBO works on typed vectors. Every coordinate is declared explicitly as
+`Discrete(...)` or `Continuous(...)`.
 
 Example:
 
-```text
-x = [2, 0, 4]
+```python
+from fliwbo_core import Continuous, Discrete, SearchSpace
+
+
+search_space = SearchSpace([
+    Discrete(4),
+    Continuous(-1.0, 1.0),
+    Discrete(5),
+])
 ```
 
-Each number is a choice. If `choice_sizes = [4, 3, 5]`, then:
+This describes vectors like:
 
 ```text
-x[0] can be 0, 1, 2, or 3
-x[1] can be 0, 1, or 2
-x[2] can be 0, 1, 2, 3, or 4
+x[0] is a discrete choice: 0, 1, 2, or 3
+x[1] is a continuous value between -1.0 and 1.0
+x[2] is a discrete choice: 0, 1, 2, 3, or 4
 ```
 
-The optimizer does not know what the choices mean. Your integration decides that.
-The optimizer can relearn the "distance" between two choices, but not the ordering.
-So, make sure the ordering reflects the real and intended structure.
+The optimizer does not know what the coordinates mean. Your integration decides
+that. For discrete coordinates, choose an ordering that reflects real structure
+when possible.
+
+In proposals, discrete coordinates are stored as Python `int` values and
+continuous coordinates are stored as Python `float` values. In NumPy arrays for
+mixed runs, all values share a float dtype, but discrete entries remain
+integer-valued.
 
 ## The Objective Function
 
@@ -63,11 +76,15 @@ Use this when the objective is cheap or when you are testing locally:
 ```python
 import numpy as np
 
-from fliwbo_core import DiscreteSearchSpace, FLIWBOConfig, FLIWBOOptimizer
-from fliwbo_core import PROptimizerConfig
+from fliwbo_core import Discrete, FLIWBOConfig, FLIWBOOptimizer
+from fliwbo_core import PROptimizerConfig, SearchSpace
 
 
-search_space = DiscreteSearchSpace([4, 3, 5])
+search_space = SearchSpace([
+    Discrete(4),
+    Discrete(3),
+    Discrete(5),
+])
 
 
 def objective(x_vector) -> float:
@@ -157,7 +174,8 @@ recovery source of truth.
 ## Important Classes
 
 ```text
-DiscreteSearchSpace       finite product of integer choices
+SearchSpace               product of discrete and continuous coordinates
+Discrete, Continuous      variable declarations for SearchSpace
 FLIWBOConfig              optimizer settings
 PROptimizerConfig         acquisition optimizer settings
 FLIWBOOptimizer           main user-facing optimizer
@@ -179,7 +197,7 @@ warp_prior_weight    strength of the prior toward alpha=beta=1
 warp_prior_tau       width of the prior around alpha=beta=1
 warp_search_sweeps   coordinate-wise warp search sweeps
 warp_search_n_jobs   parallel workers for warp scoring
-pr_config            settings for acquisition search over integer vectors
+pr_config            settings for PR acquisition search over typed vectors
 ```
 
 For a first integration, change as little as possible. Start with small

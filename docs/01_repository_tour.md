@@ -14,10 +14,10 @@ fliwbo_core       = the optimizer brain
 examples/quixbugs = one body built around that brain
 ```
 
-The optimizer brain only chooses integer vectors. It does not know what those
-integers mean.
+The optimizer brain only chooses typed vectors. It does not know what those
+coordinates mean.
 
-The QuixBugs example explains one way to turn those integers into a multi-agent
+The QuixBugs example explains one way to turn discrete coordinates into a multi-agent
 system, run it, test it, and send a score back to the optimizer.
 
 ## Top-Level Files
@@ -37,11 +37,10 @@ requirements.txt   # pinned development dependency snapshot
 ```text
 src/fliwbo_core/
 |-- optimizer.py        # public API: run, start, ask, tell, resume
-|-- BO_loop.py          # compatibility wrapper for older scripts
 |-- BO_utils.py         # beta warps and BO schedules
 |-- warp_optimizer.py   # chooses the best input warp from a finite library
-|-- PR_optimizer.py     # searches the discrete space for the best acquisition value
-|-- discrete_space.py   # maps integer vectors into the model input domain
+|-- PR_optimizer.py     # searches typed spaces for the best acquisition value
+|-- search_space.py     # typed search-space projection and normalization
 |-- decoder.py          # helper for decoding ordered resource maps
 `-- BO_config.py        # default knobs and constants
 ```
@@ -49,7 +48,8 @@ src/fliwbo_core/
 Most external users should start with:
 
 ```python
-from fliwbo_core import DiscreteSearchSpace, FLIWBOConfig, FLIWBOOptimizer
+from fliwbo_core import Continuous, Discrete, SearchSpace
+from fliwbo_core import FLIWBOConfig, FLIWBOOptimizer
 ```
 
 ## QuixBugs Example
@@ -58,7 +58,7 @@ from fliwbo_core import DiscreteSearchSpace, FLIWBOConfig, FLIWBOOptimizer
 examples/quixbugs/
 |-- resource_statement.py   # LLMs, tools, prompts, agent limits
 |-- encoding_map.json       # ordered choices used by the vector encoding
-|-- search_space.py         # computes choice sizes for the QuixBugs vector
+|-- search_space.py         # declares the QuixBugs SearchSpace
 |-- features_to_spec.py     # turns a vector into mas_spec.json
 |-- mas_spec.json           # current generated MAS spec
 |-- objective.py            # objective(x_vector) adapter for QuixBugs
@@ -85,7 +85,7 @@ examples/quixbugs/noise_estimates/
 The whole workflow is:
 
 ```text
-1. Define a finite design space.
+1. Define a bounded typed design space.
 2. Give FLIWBO a few starting vectors and scores.
 3. FLIWBO proposes the next vector.
 4. Your code evaluates that vector.

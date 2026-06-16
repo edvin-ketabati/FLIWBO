@@ -3,11 +3,11 @@
 This module contains the package surface most users should touch:
 
 - FLIWBOOptimizer for simple runs and durable ask/tell runs.
-- DiscreteSearchSpace for declaring finite integer-vector bounds.
+- SearchSpace for declaring typed vector bounds.
 - FLIWBOConfig and PROptimizerConfig for optimizer knobs.
 - OptimizationRun, OptimizationProposal, and OptimizationResult for orchestration.
 
-The optimizer never builds or evaluates a real system. It proposes integer
+The optimizer never builds or evaluates a real system. It proposes typed
 vectors. User code evaluates those vectors and returns scalar scores.
 """
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 import csv
 import json
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,32 +48,13 @@ from .BO_config import (
 )
 from .BO_utils import beta_t as default_beta_fn
 from .BO_utils import beta_warp_nd, make_warp_library
-from .discrete_space import discrete_vector_to_jsonable, normalize_discrete_matrix
-from .PR_optimizer import PROptimizerConfig, optimize_with_restarts
+from .PR_optimizer import PROptimizerConfig, TorchGaussianProcessUCB, optimize_with_restarts
+from .search_space import Number, SearchSpace
 from .warp_optimizer import full_factorized_library_size, optimize_warp_coordinatewise
 
 
 ObjectiveFunction = Callable[[np.ndarray], float]
 BetaSchedule = Callable[..., float]
-
-
-@dataclass(frozen=True)
-class DiscreteSearchSpace:
-    """Finite product space represented by the number of choices per coordinate."""
-
-    choice_sizes: tuple[int, ...]
-
-    def __init__(self, choice_sizes: Sequence[int]):
-        sizes = tuple(int(size) for size in choice_sizes)
-        if not sizes:
-            raise ValueError("choice_sizes must contain at least one coordinate")
-        if any(size <= 0 for size in sizes):
-            raise ValueError("All choice sizes must be positive")
-        object.__setattr__(self, "choice_sizes", sizes)
-
-    @property
-    def dimension(self) -> int:
-        return len(self.choice_sizes)
 
 
 def default_pr_config() -> PROptimizerConfig:
@@ -126,7 +107,7 @@ class OptimizationProposal:
     """A vector proposed by ask() before the expensive objective is evaluated."""
 
     iteration: int
-    x_vector: list[int]
+    x_vector: list[Number]
     acquisition_value: float
     warp_alpha: list[float]
     warp_beta: list[float]
@@ -140,7 +121,7 @@ class BOIterationRecord:
     """A completed proposal plus the objective value returned by user code."""
 
     iteration: int
-    x_vector: list[int]
+    x_vector: list[Number]
     y_value: float
     acquisition_value: float
     warp_alpha: list[float]
@@ -180,19 +161,18 @@ class OptimizationResult:
 
 
 class FLIWBOOptimizer:
-    """Finite-library input-warped Bayesian optimizer over a discrete search space."""
+    """Finite-library input-warped Bayesian optimizer over typed search spaces."""
 
     def __init__(
         self,
-        search_space: DiscreteSearchSpace | Sequence[int],
+        search_space: SearchSpace,
         config: FLIWBOConfig | None = None,
         *,
         beta_fn: BetaSchedule = default_beta_fn,
     ):
-        if isinstance(search_space, DiscreteSearchSpace):
-            self.search_space = search_space
-        else:
-            self.search_space = DiscreteSearchSpace(search_space)
+        if not isinstance(search_space, SearchSpace):
+            raise TypeError("search_space must be a SearchSpace instance")
+        self.search_space = search_space
 
         self.config = config or FLIWBOConfig()
         self.beta_fn = beta_fn
@@ -220,7 +200,7 @@ class FLIWBOOptimizer:
     ) -> "OptimizationRun":
         """Resume a durable run created by start(..., run_dir=...) or run(..., run_dir=...)."""
         manifest = _read_json(Path(run_dir) / _MANIFEST_FILE)
-        search_space = DiscreteSearchSpace(manifest["search_space"]["choice_sizes"])
+        search_space = SearchSpace.from_jsonable(manifest["search_space"])
         config = _config_from_jsonable(manifest["config"])
         optimizer = cls(search_space, config=config, beta_fn=beta_fn)
         return OptimizationRun.resume(optimizer, run_dir)
@@ -244,7 +224,7 @@ class FLIWBOOptimizer:
         while not run.is_complete:
             proposal = run.ask()
             try:
-                y_next = float(objective_fn(np.asarray(proposal.x_vector, dtype=int)))
+                y_next = float(objective_fn(self.search_space.objective_array(proposal.x_vector)))
             except Exception as exc:
                 run.record_objective_error(proposal, exc)
                 raise
@@ -254,13 +234,14 @@ class FLIWBOOptimizer:
 
     def _compute_next_proposal(
         self,
-        X_discrete: np.ndarray,
+        X_observed: np.ndarray,
         y_raw: np.ndarray,
         iteration: int,
     ) -> OptimizationProposal:
-        """Fit the current BO model and choose the next discrete vector."""
+        """Fit the current BO model and choose the next typed vector."""
 
-        X = normalize_discrete_matrix(X_discrete, list(self.search_space.choice_sizes))
+        X_projected = self.search_space.project_matrix(X_observed)
+        X = self.search_space.normalize_matrix(X_projected)
         y = self._normalize_y(y_raw)
         noise_var = (self.config.noise_std / self.config.y_scale) ** 2
 
@@ -301,26 +282,31 @@ class FLIWBOOptimizer:
         beta_chosen = warp_result.beta
         winning_gpr = warp_result.gpr
 
-        def acquisition(x_discrete: np.ndarray) -> float:
-            x_model = normalize_discrete_matrix(
-                x_discrete,
-                list(self.search_space.choice_sizes),
-            )
-            z = beta_warp_nd(x_model, alpha_chosen, beta_chosen)
-            mu, std = winning_gpr.predict(z, return_std=True)
-            return float(mu[0] + np.sqrt(beta_value) * std[0])
+        torch_acquisition = TorchGaussianProcessUCB(winning_gpr, beta_value)
+        pr_dimensions = self.search_space.pr_dimension_specs(alpha_chosen, beta_chosen)
 
-        x_next_flat, acquisition_value = optimize_with_restarts(
-            acquisition,
-            list(self.search_space.choice_sizes),
+        x_next_pr, _pr_acquisition_value = optimize_with_restarts(
+            torch_acquisition,
+            pr_dimensions,
             self.config.pr_config,
             seed=self.config.pr_seed,
         )
-        x_next_discrete = x_next_flat.reshape(1, -1)
+        x_next_raw = self.search_space.raw_from_pr_vector(
+            x_next_pr,
+            alpha_chosen,
+            beta_chosen,
+        )
+        acquisition_value = self._sklearn_ucb_value(
+            winning_gpr,
+            x_next_raw,
+            alpha_chosen,
+            beta_chosen,
+            beta_value,
+        )
 
         return OptimizationProposal(
             iteration=iteration,
-            x_vector=discrete_vector_to_jsonable(x_next_discrete),
+            x_vector=self.search_space.vector_to_jsonable(x_next_raw),
             acquisition_value=float(acquisition_value),
             warp_alpha=[float(value) for value in alpha_chosen.tolist()],
             warp_beta=[float(value) for value in beta_chosen.tolist()],
@@ -330,18 +316,31 @@ class FLIWBOOptimizer:
         )
 
     def _coerce_x_init(self, X_init: np.ndarray) -> np.ndarray:
-        X_discrete = np.asarray(X_init, dtype=int)
-        if X_discrete.ndim == 1:
-            X_discrete = X_discrete.reshape(1, -1)
+        X = np.asarray(X_init, dtype=float)
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
 
-        if X_discrete.ndim != 2:
-            raise ValueError(f"X_init must be a 1D or 2D array, got shape {X_discrete.shape}")
-        if X_discrete.shape[1] != self.search_space.dimension:
+        if X.ndim != 2:
+            raise ValueError(f"X_init must be a 1D or 2D array, got shape {X.shape}")
+        if X.shape[1] != self.search_space.dimension:
             raise ValueError(
                 f"Expected X vectors of length {self.search_space.dimension}, "
-                f"got {X_discrete.shape[1]}"
+                f"got {X.shape[1]}"
             )
-        return X_discrete.copy()
+        return self.search_space.project_matrix(X)
+
+    def _sklearn_ucb_value(
+        self,
+        gpr: GaussianProcessRegressor,
+        x_raw: np.ndarray,
+        alpha: np.ndarray,
+        beta: np.ndarray,
+        beta_value: float,
+    ) -> float:
+        x_model = self.search_space.normalize_matrix(np.asarray(x_raw).reshape(1, -1))
+        z = beta_warp_nd(x_model, alpha, beta)
+        mu, std = gpr.predict(z, return_std=True)
+        return float(mu[0] + np.sqrt(beta_value) * std[0])
 
     def _normalize_y(self, y_raw: np.ndarray) -> np.ndarray:
         return (np.asarray(y_raw, dtype=float).ravel() - self.config.y_center) / self.config.y_scale
@@ -415,24 +414,24 @@ class OptimizationRun:
         *,
         run_dir: Path | None,
     ) -> "OptimizationRun":
-        X_discrete = optimizer._coerce_x_init(X_init)
+        X_projected = optimizer._coerce_x_init(X_init)
         y_raw = np.asarray(y_init, dtype=float).ravel()
 
-        if y_raw.shape[0] != X_discrete.shape[0]:
+        if y_raw.shape[0] != X_projected.shape[0]:
             raise ValueError(
-                f"X_init contains {X_discrete.shape[0]} rows, "
+                f"X_init contains {X_projected.shape[0]} rows, "
                 f"but y_init contains {y_raw.shape[0]} values"
             )
 
         if run_dir is not None:
             journal = _RunJournal(run_dir)
-            journal.initialize(optimizer, X_discrete, y_raw)
+            journal.initialize(optimizer, X_projected, y_raw)
 
         return cls(
             optimizer,
-            initial_x=X_discrete,
+            initial_x=X_projected,
             initial_y=y_raw,
-            x_observed=X_discrete,
+            x_observed=X_projected,
             y_observed=y_raw,
             records=[],
             pending_proposals=[],
@@ -531,7 +530,8 @@ class OptimizationRun:
             item for item in self._pending_proposals
             if item.iteration != pending.iteration
         ]
-        self.x_observed = np.vstack([self.x_observed, np.asarray(record.x_vector, dtype=int)])
+        next_x = self.optimizer.search_space.objective_array(record.x_vector)
+        self.x_observed = np.vstack([self.x_observed, next_x])
         self.y_observed = np.concatenate([self.y_observed, [record.y_value]])
         return record
 
@@ -612,9 +612,7 @@ class _RunJournal:
         manifest = {
             "schema_version": 1,
             "created_at_utc": _utc_now(),
-            "search_space": {
-                "choice_sizes": list(optimizer.search_space.choice_sizes),
-            },
+            "search_space": optimizer.search_space.to_jsonable(),
             "config": _config_to_jsonable(optimizer.config),
             "files": {
                 "observations": _OBSERVATIONS_FILE,
@@ -628,7 +626,7 @@ class _RunJournal:
             {
                 "source": "initial",
                 "iteration": 0,
-                "x_vector": json.dumps(discrete_vector_to_jsonable(row)),
+                "x_vector": json.dumps(optimizer.search_space.vector_to_jsonable(row)),
                 "y_value": float(y_value),
             }
             for row, y_value in zip(X_init, y_init)
@@ -649,17 +647,19 @@ class _RunJournal:
         if not self.manifest_path.exists():
             raise FileNotFoundError(f"No {_MANIFEST_FILE} found in run directory: {self.run_dir}")
 
+        manifest = _read_json(self.manifest_path)
+        search_space = SearchSpace.from_jsonable(manifest["search_space"])
         observation_rows = _read_csv_rows(self.observations_path)
         proposal_rows = _read_csv_rows(self.proposals_path)
 
-        initial_x_rows: list[list[int]] = []
+        initial_x_rows: list[list[Number]] = []
         initial_y_values: list[float] = []
         completed_y_by_iteration: dict[int, float] = {}
 
         for row in observation_rows:
             source = row.get("source")
             iteration = int(row["iteration"])
-            x_vector = _json_list(row["x_vector"])
+            x_vector = _json_vector(row["x_vector"])
             y_value = float(row["y_value"])
 
             if source == "initial":
@@ -687,9 +687,14 @@ class _RunJournal:
         records.sort(key=lambda record: record.iteration)
         _validate_contiguous_iterations(records)
 
-        initial_x = np.asarray(initial_x_rows, dtype=int)
+        initial_x = search_space.project_matrix(np.asarray(initial_x_rows, dtype=float))
         initial_y = np.asarray(initial_y_values, dtype=float)
-        completed_x = np.asarray([record.x_vector for record in records], dtype=int)
+        completed_rows = [record.x_vector for record in records]
+        completed_x = (
+            search_space.project_matrix(np.asarray(completed_rows, dtype=float))
+            if completed_rows
+            else np.empty((0, search_space.dimension), dtype=search_space.array_dtype)
+        )
         completed_y = np.asarray([record.y_value for record in records], dtype=float)
 
         if completed_x.size == 0:
@@ -798,7 +803,7 @@ def _proposal_to_row(proposal: OptimizationProposal, *, status: str) -> dict[str
 def _proposal_from_row(row: dict[str, str]) -> OptimizationProposal:
     return OptimizationProposal(
         iteration=int(row["iteration"]),
-        x_vector=[int(value) for value in _json_list(row["x_vector"])],
+        x_vector=_json_vector(row["x_vector"]),
         acquisition_value=float(row["acquisition_value"]),
         warp_alpha=[float(value) for value in _json_list(row["warp_alpha"])],
         warp_beta=[float(value) for value in _json_list(row["warp_beta"])],
@@ -834,6 +839,19 @@ def _json_list(raw_value: str) -> list[Any]:
     if not isinstance(value, list):
         raise ValueError(f"Expected JSON list, got: {raw_value!r}")
     return value
+
+
+def _json_vector(raw_value: str) -> list[Number]:
+    values = _json_list(raw_value)
+    vector: list[Number] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(f"Expected numeric x_vector values, got: {raw_value!r}")
+        if isinstance(value, int):
+            vector.append(int(value))
+        else:
+            vector.append(float(value))
+    return vector
 
 
 def _read_json(path: Path) -> dict[str, Any]:
