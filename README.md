@@ -12,10 +12,6 @@ The vector can contain:
 Discrete(k)          one integer choice in 0..k-1
 Continuous(a, b)     one float inside [a, b]
 ```
-
-Acquisition optimization uses one probabilistic reparameterization (PR)
-framework for both discrete and continuous coordinates.
-
 ## Project Status / Disclaimer
 
 This repository is shared as the code from my master's thesis project. I was a
