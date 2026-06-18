@@ -2,7 +2,7 @@
 
 This page explains the example integration.
 
-The example is not the core product. It is a worked pattern:
+The example is not the core product. It is a just a worked example to showcase how a full integration might look.
 
 ```text
 vector -> MAS spec -> runtime -> tests -> score -> optimizer
@@ -110,7 +110,7 @@ Output:
 examples/quixbugs/mas_spec.json
 ```
 
-The spec contains agents like:
+The spec contains agents defined with the following:
 
 ```text
 id
@@ -240,7 +240,7 @@ This reads:
 examples/quixbugs/initial_x_points.csv
 ```
 
-and writes durable BO journals under:
+and writes optimization journals under:
 
 ```text
 examples/quixbugs/BO metadata/
@@ -276,5 +276,3 @@ runtime runner
 evaluator
 seed observations
 ```
-
-The optimizer package stays the same.
