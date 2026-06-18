@@ -138,15 +138,7 @@ This makes every proposed vector durable before evaluation starts.
 
 Endpoint setup belongs in your integration, not in `fliwbo_core`.
 
-Good places for endpoint code:
-
-```text
-your_project/runtime.py
-your_project/build_system.py
-your_project/objective.py
-```
-
-Things your objective adapter may do:
+Examples of things your objective adapter may do:
 
 ```text
 read API keys from the environment
@@ -160,7 +152,7 @@ write integration logs
 return one score
 ```
 
-The optimizer should still only receive:
+The optimizer only receives:
 
 ```python
 score = objective(x_vector)
@@ -173,24 +165,3 @@ proposal = run.ask()
 score = objective(proposal.x_vector)
 run.tell(proposal, score)
 ```
-
-## Step 7: Start With A Dry Run
-
-Before using real endpoints, make a fake objective:
-
-```python
-def dry_objective(x_vector) -> float:
-    return float(sum(x_vector))
-```
-
-Then verify:
-
-```text
-the optimizer runs
-the run directory is written
-ask/tell works
-resume works
-your vector bounds are correct
-```
-
-Only after that should you connect expensive runtimes.
