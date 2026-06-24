@@ -27,6 +27,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, WhiteKernel
 
 from .BO_config import (
+    BETA_SCALING,
     EPSILON_WARP,
     LENGTHSCALE,
     N_ITERS,
@@ -91,6 +92,7 @@ class FLIWBOConfig:
     y_center: float = Y_CENTER
     y_scale: float = Y_SCALE
     epsilon_warp: float = EPSILON_WARP
+    beta_scaling: float = BETA_SCALING
     warp_search_sweeps: int = WARP_SEARCH_SWEEPS
     warp_search_n_jobs: int = WARP_SEARCH_N_JOBS
     pr_config: PROptimizerConfig = field(default_factory=default_pr_config)
@@ -264,7 +266,7 @@ class FLIWBOOptimizer:
         self._log(f"N_eps full factorized library: {n_full_warp_library}")
         self._log(f"BO iteration {iteration}/{self.config.n_iters}")
 
-        beta_value = float(self.beta_fn(iteration, N_eps=n_full_warp_library))
+        beta_value = self._beta_value(iteration, n_full_warp_library)
         prior_weight = self.config.warp_prior_weight if self.config.use_warp_prior else 0.0
 
         warp_result = optimize_warp_coordinatewise(
@@ -345,6 +347,17 @@ class FLIWBOOptimizer:
     def _normalize_y(self, y_raw: np.ndarray) -> np.ndarray:
         return (np.asarray(y_raw, dtype=float).ravel() - self.config.y_center) / self.config.y_scale
 
+    def _beta_value(self, iteration: int, n_full_warp_library: int) -> float:
+        if self.beta_fn is default_beta_fn:
+            return float(
+                self.beta_fn(
+                    iteration,
+                    N_eps=n_full_warp_library,
+                    beta_scaling=self.config.beta_scaling,
+                )
+            )
+        return float(self.beta_fn(iteration, N_eps=n_full_warp_library))
+
     def _validate_config(self) -> None:
         if self.config.n_iters < 0:
             raise ValueError(f"n_iters must be non-negative, got {self.config.n_iters}")
@@ -352,6 +365,8 @@ class FLIWBOOptimizer:
             raise ValueError(f"y_scale must be positive, got {self.config.y_scale}")
         if self.config.epsilon_warp <= 0.0:
             raise ValueError(f"epsilon_warp must be positive, got {self.config.epsilon_warp}")
+        if self.config.beta_scaling <= 0.0:
+            raise ValueError(f"beta_scaling must be positive, got {self.config.beta_scaling}")
         if self.config.warp_prior_weight < 0.0:
             raise ValueError(
                 f"warp_prior_weight must be non-negative, got {self.config.warp_prior_weight}"

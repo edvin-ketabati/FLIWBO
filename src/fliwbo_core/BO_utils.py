@@ -83,10 +83,13 @@ def gamma_t(t, dim = 1 , nu = 2.5, c_gamma = 1.5, log_power = 1):
     alpha = (dim * (dim + 1)) / (2.0 * nu + dim * (dim + 1))
     return c_gamma * (t ** alpha) * (np.log1p(t) ** log_power)
 
-def beta_t(t, N_eps, delta = 0.1, Cwarp = 1):
+def beta_t(t, N_eps, delta=0.1, Cwarp=1, beta_scaling=BETA_SCALING):
     """UCB exploration schedule for the finite warp library."""
 
-    return (2 * (Cwarp ** 2) + 300.0 * gamma_t(t) * (np.log(t * N_eps / delta) ** 3))/BETA_SCALING
+    return (
+        2 * (Cwarp ** 2)
+        + 300.0 * gamma_t(t) * (np.log(t * N_eps / delta) ** 3)
+    ) / beta_scaling
 
 
 def log_prior_unity_weak(a, b, tau=0.75):

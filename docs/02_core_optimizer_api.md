@@ -191,6 +191,7 @@ OptimizationResult        convenient final/in-memory result
 n_iters              number of BO iterations
 noise_std            assumed objective noise
 lengthscale          base GP kernel lengthscale
+beta_scaling         divisor for the default beta_t exploration schedule
 epsilon_warp         resolution of the finite warp library
 use_warp_prior       whether to favor unity warps
 warp_prior_weight    strength of the prior toward alpha=beta=1
@@ -202,6 +203,11 @@ pr_config            settings for PR acquisition search over typed vectors
 
 For a first integration, change as little as possible. Start with small
 `n_iters`, small `PROptimizerConfig`, and a deterministic dry-run objective.
+
+`beta_scaling` only affects the built-in `beta_t` schedule. Larger values make
+the default UCB acquisition less exploratory; smaller values make it more
+exploratory. If you pass a custom `beta_fn` to `FLIWBOOptimizer`, that function
+owns the exploration schedule instead.
 
 ## The Warp Prior
 

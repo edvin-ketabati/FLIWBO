@@ -22,8 +22,8 @@ Y_SCALE = 20.0
 # Maximum number of BO iterations
 N_ITERS = 158
 
-# Beta scaling
-BETA_SCALING = 10
+# Divisor for the default beta_t UCB exploration schedule.
+BETA_SCALING = 5.0
 
 # Whether to use the unity warp prior.
 # The prior is centered on alpha=beta=1 for every coordinate, which is the

@@ -46,6 +46,16 @@ This is the assumed objective noise. Small values make the GP trust observed
 scores more tightly. Large values tell the GP that repeated evaluations of the
 same design might vary, so the fitted curve becomes less pinned to each point.
 
+```text
+beta_scaling
+```
+
+This divides the built-in `beta_t` exploration schedule used by the UCB
+acquisition. Larger values reduce the exploration bonus; smaller values increase
+it. The default is `5.0`. This setting only applies to the default schedule. If
+you pass a custom `beta_fn` to `FLIWBOOptimizer`, that custom function controls
+the beta value.
+
 ## Warp Knobs
 
 ```text
@@ -176,6 +186,7 @@ config = FLIWBOConfig(
     n_iters=5,
     lengthscale=0.35,
     noise_std=2.21,
+    beta_scaling=5.0,
     use_warp_prior=True,
     warp_prior_weight=0.005,
     warp_prior_tau=0.75,
