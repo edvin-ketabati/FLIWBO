@@ -354,6 +354,7 @@ class FLIWBOOptimizer:
                     iteration,
                     N_eps=n_full_warp_library,
                     beta_scaling=self.config.beta_scaling,
+                    dim=self.search_space.dimension,
                 )
             )
         return float(self.beta_fn(iteration, N_eps=n_full_warp_library))

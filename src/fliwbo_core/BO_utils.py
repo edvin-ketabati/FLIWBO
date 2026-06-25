@@ -77,18 +77,18 @@ def make_warp_library(
     return library
 
 
-def gamma_t(t, dim = 1 , nu = 2.5, c_gamma = 1.5, log_power = 1):
+def gamma_t(t, dim=1, nu=2.5, c_gamma=1.5, log_power=1):
     """Exploration-growth helper used by the beta_t schedule."""
 
     alpha = (dim * (dim + 1)) / (2.0 * nu + dim * (dim + 1))
     return c_gamma * (t ** alpha) * (np.log1p(t) ** log_power)
 
-def beta_t(t, N_eps, delta=0.1, Cwarp=1, beta_scaling=BETA_SCALING):
+def beta_t(t, N_eps, delta=0.1, Cwarp=1, beta_scaling=BETA_SCALING, dim=1):
     """UCB exploration schedule for the finite warp library."""
 
     return (
         2 * (Cwarp ** 2)
-        + 300.0 * gamma_t(t) * (np.log(t * N_eps / delta) ** 3)
+        + 300.0 * gamma_t(t, dim=dim) * (np.log(t * N_eps / delta) ** 3)
     ) / beta_scaling
 
 
