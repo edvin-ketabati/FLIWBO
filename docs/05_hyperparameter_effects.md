@@ -226,6 +226,3 @@ Open the notebook from the repository root:
 pip install -e ".[notebooks]"
 python -m notebook examples/notebooks/01_hyperparameter_visualization.ipynb
 ```
-
-The notebook is intentionally small. It does not call LLM endpoints, QuixBugs,
-or external services.
