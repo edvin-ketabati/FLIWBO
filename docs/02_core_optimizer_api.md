@@ -198,6 +198,8 @@ warp_prior_weight    strength of the prior toward alpha=beta=1
 warp_prior_tau       width of the prior around alpha=beta=1
 warp_search_sweeps   coordinate-wise warp search sweeps
 warp_search_n_jobs   parallel workers for warp scoring
+backend              "auto", "sklearn", or "torch"
+device               "auto", "cpu", "cuda", or "cuda:N" for the torch backend
 pr_config            settings for PR acquisition search over typed vectors
 ```
 
@@ -208,6 +210,51 @@ For a first integration, change as little as possible. Start with small
 the default UCB acquisition less exploratory; smaller values make it more
 exploratory. If you pass a custom `beta_fn` to `FLIWBOOptimizer`, that function
 owns the exploration schedule instead.
+
+## Compute Backend
+
+The optimizer has two GP backends:
+
+```text
+backend="torch"      fixed-kernel Torch GP used for batched warp scoring
+backend="sklearn"    original sklearn GaussianProcessRegressor path
+backend="auto"       Torch backend on CUDA when available, otherwise Torch on CPU
+```
+
+The default is:
+
+```python
+FLIWBOConfig(backend="auto", device="auto")
+```
+
+`device` only affects the Torch backend:
+
+```text
+device="auto"        CUDA if PyTorch can see CUDA, otherwise CPU
+device="cpu"         Torch CPU
+device="cuda"        default CUDA device
+device="cuda:1"      a specific CUDA device
+```
+
+For a GPU run, use:
+
+```python
+config = FLIWBOConfig(
+    backend="torch",
+    device="cuda",
+)
+```
+
+For reference/debugging runs that exactly use the sklearn GP implementation:
+
+```python
+config = FLIWBOConfig(backend="sklearn")
+```
+
+The backend changes where the fixed GP math is evaluated. It does not change
+the finite warp library, the coordinate-wise warp search, the Matern-5/2 kernel,
+the white-noise term, the UCB acquisition, or the probabilistic
+reparameterization acquisition optimizer.
 
 ## The Warp Prior
 

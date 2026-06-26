@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from fliwbo_core.PR_optimizer import PRDimension, PROptimizerConfig, optimize_with_restarts
@@ -50,4 +51,49 @@ def test_mixed_pr_returns_valid_coordinates():
     assert x_best.shape == (2,)
     assert x_best[0] in {0, 1, 2}
     assert 0.2 <= x_best[1] <= 0.8
+    assert np.isfinite(value)
+
+
+def test_pr_optimizer_uses_requested_cpu_device():
+    config = PROptimizerConfig(num_restarts=1, num_steps=2, num_samples=4)
+    seen_devices: list[str] = []
+
+    def acquisition(z):
+        seen_devices.append(z.device.type)
+        return -torch.abs(z[:, 0] - 1.0)
+
+    x_best, value = optimize_with_restarts(
+        acquisition,
+        [PRDimension.discrete([0.0, 1.0, 2.0])],
+        config,
+        seed=14,
+        device="cpu",
+    )
+
+    assert seen_devices
+    assert set(seen_devices) == {"cpu"}
+    assert x_best[0] in {0, 1, 2}
+    assert np.isfinite(value)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_pr_optimizer_uses_requested_cuda_device():
+    config = PROptimizerConfig(num_restarts=1, num_steps=2, num_samples=4)
+    seen_devices: list[str] = []
+
+    def acquisition(z):
+        seen_devices.append(z.device.type)
+        return -torch.abs(z[:, 0] - 1.0)
+
+    x_best, value = optimize_with_restarts(
+        acquisition,
+        [PRDimension.discrete([0.0, 1.0, 2.0])],
+        config,
+        seed=15,
+        device="cuda",
+    )
+
+    assert seen_devices
+    assert set(seen_devices) == {"cuda"}
+    assert x_best[0] in {0, 1, 2}
     assert np.isfinite(value)

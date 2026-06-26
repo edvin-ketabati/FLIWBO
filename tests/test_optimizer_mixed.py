@@ -1,10 +1,12 @@
 import numpy as np
+import pytest
 
 from fliwbo_core import Continuous, Discrete, FLIWBOConfig, FLIWBOOptimizer
 from fliwbo_core import PROptimizerConfig, SearchSpace
 
 
-def test_optimizer_runs_one_mixed_ask_tell_iteration(tmp_path):
+@pytest.mark.parametrize("backend", ["sklearn", "torch", "auto"])
+def test_optimizer_runs_one_mixed_ask_tell_iteration(tmp_path, backend):
     search_space = SearchSpace([Discrete(3), Continuous(-1.0, 1.0)])
 
     def objective(x_vector):
@@ -17,6 +19,8 @@ def test_optimizer_runs_one_mixed_ask_tell_iteration(tmp_path):
         epsilon_warp=30.0,
         warp_search_sweeps=1,
         warp_search_n_jobs=1,
+        backend=backend,
+        device="cpu",
         pr_config=PROptimizerConfig(num_restarts=1, num_steps=2, num_samples=4),
         pr_seed=123,
     )
@@ -26,7 +30,7 @@ def test_optimizer_runs_one_mixed_ask_tell_iteration(tmp_path):
         beta_fn=lambda iteration, N_eps: 1.0,
     )
 
-    run = optimizer.start(X_init, y_init, run_dir=tmp_path / "mixed_run")
+    run = optimizer.start(X_init, y_init, run_dir=tmp_path / f"mixed_run_{backend}")
     proposal = run.ask()
 
     assert isinstance(proposal.x_vector[0], int)

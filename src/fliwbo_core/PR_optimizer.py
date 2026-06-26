@@ -14,6 +14,8 @@ import numpy as np
 import torch
 import torch.optim as optim
 
+from .torch_gp import TorchFixedGaussianProcess, matern25_kernel
+
 
 @dataclass(frozen=True)
 class PROptimizerConfig:
@@ -54,29 +56,75 @@ class PRDimension:
 class TorchGaussianProcessUCB:
     """Differentiable UCB mirror for the fitted sklearn GP."""
 
-    def __init__(self, gpr: Any, beta_value: float):
-        matern_kernel, noise_level = _extract_matern25_and_noise(gpr.kernel_)
-        self.X_train = torch.as_tensor(gpr.X_train_, dtype=torch.float64)
-        self.alpha = torch.as_tensor(gpr.alpha_, dtype=torch.float64).reshape(-1)
-        self.L = torch.as_tensor(gpr.L_, dtype=torch.float64)
-        self.length_scale = torch.as_tensor(matern_kernel.length_scale, dtype=torch.float64)
-        self.noise_level = float(noise_level)
+    def __init__(
+        self,
+        gpr: Any,
+        beta_value: float,
+        *,
+        device: torch.device | str | None = None,
+    ):
+        if isinstance(gpr, TorchFixedGaussianProcess):
+            resolved_device = torch.device(device) if device is not None else gpr.device
+            if gpr.X_train_ is None or gpr.alpha_ is None or gpr.L_ is None:
+                raise RuntimeError("TorchFixedGaussianProcess must be fit before UCB use")
+            self.X_train = gpr.X_train_.detach().to(dtype=torch.float64, device=resolved_device)
+            self.alpha = gpr.alpha_.detach().to(dtype=torch.float64, device=resolved_device).reshape(-1)
+            self.L = gpr.L_.detach().to(dtype=torch.float64, device=resolved_device)
+            self.length_scale = gpr.length_scale.detach().to(
+                dtype=torch.float64,
+                device=resolved_device,
+            )
+            self.noise_level = float(gpr.noise_level)
+            self.y_train_mean = torch.as_tensor(
+                gpr._y_train_mean,
+                dtype=torch.float64,
+                device=resolved_device,
+            ).reshape(-1)[0]
+            self.y_train_std = torch.as_tensor(
+                gpr._y_train_std,
+                dtype=torch.float64,
+                device=resolved_device,
+            ).reshape(-1)[0]
+        else:
+            resolved_device = torch.device(device) if device is not None else torch.device("cpu")
+            matern_kernel, noise_level = _extract_matern25_and_noise(gpr.kernel_)
+            self.X_train = torch.as_tensor(
+                gpr.X_train_,
+                dtype=torch.float64,
+                device=resolved_device,
+            )
+            self.alpha = torch.as_tensor(
+                gpr.alpha_,
+                dtype=torch.float64,
+                device=resolved_device,
+            ).reshape(-1)
+            self.L = torch.as_tensor(gpr.L_, dtype=torch.float64, device=resolved_device)
+            self.length_scale = torch.as_tensor(
+                matern_kernel.length_scale,
+                dtype=torch.float64,
+                device=resolved_device,
+            )
+            self.noise_level = float(noise_level)
+            self.y_train_mean = torch.as_tensor(
+                getattr(gpr, "_y_train_mean", 0.0),
+                dtype=torch.float64,
+                device=resolved_device,
+            ).reshape(-1)[0]
+            self.y_train_std = torch.as_tensor(
+                getattr(gpr, "_y_train_std", 1.0),
+                dtype=torch.float64,
+                device=resolved_device,
+            ).reshape(-1)[0]
+
+        self.device = resolved_device
         self.beta_value = float(beta_value)
-        self.y_train_mean = torch.as_tensor(
-            getattr(gpr, "_y_train_mean", 0.0),
-            dtype=torch.float64,
-        ).reshape(-1)[0]
-        self.y_train_std = torch.as_tensor(
-            getattr(gpr, "_y_train_std", 1.0),
-            dtype=torch.float64,
-        ).reshape(-1)[0]
 
     def __call__(self, Z: torch.Tensor) -> torch.Tensor:
         if Z.ndim == 1:
             Z = Z.reshape(1, -1)
-        Z = Z.to(dtype=torch.float64)
+        Z = Z.to(dtype=torch.float64, device=self.device)
 
-        K_trans = _matern25_kernel(Z, self.X_train, self.length_scale)
+        K_trans = matern25_kernel(Z, self.X_train, self.length_scale)
         mean = K_trans.matmul(self.alpha)
 
         v = torch.linalg.solve_triangular(self.L, K_trans.T, upper=False)
@@ -105,6 +153,7 @@ class FactorizedProbabilisticReparameterization:
         tau_decay: float = 0.98,
         tau_min: float = 0.01,
         seed: int | None = None,
+        device: torch.device | str | None = None,
     ):
         if not dimensions:
             raise ValueError("PR dimensions must contain at least one coordinate")
@@ -112,6 +161,7 @@ class FactorizedProbabilisticReparameterization:
         if seed is not None:
             torch.manual_seed(seed)
 
+        self.device = torch.device(device) if device is not None else torch.device("cpu")
         self.dimensions = tuple(dimensions)
         invalid_kinds = [
             dimension.kind for dimension in self.dimensions
@@ -135,11 +185,21 @@ class FactorizedProbabilisticReparameterization:
             if dimension.kind == "continuous"
         ]
         self.logits = [
-            torch.nn.Parameter(torch.randn(len(self.dimensions[idx].warped_choices), dtype=torch.float64))
+            torch.nn.Parameter(
+                torch.randn(
+                    len(self.dimensions[idx].warped_choices),
+                    dtype=torch.float64,
+                    device=self.device,
+                )
+            )
             for idx in self.discrete_positions
         ]
         self.discrete_warped_choices = [
-            torch.as_tensor(self.dimensions[idx].warped_choices, dtype=torch.float64)
+            torch.as_tensor(
+                self.dimensions[idx].warped_choices,
+                dtype=torch.float64,
+                device=self.device,
+            )
             for idx in self.discrete_positions
         ]
 
@@ -151,9 +211,21 @@ class FactorizedProbabilisticReparameterization:
                 self.dimensions[idx].warped_bounds
                 for idx in self.continuous_positions
             ]
-            lower = torch.tensor([bound[0] for bound in bounds if bound is not None], dtype=torch.float64)
-            upper = torch.tensor([bound[1] for bound in bounds if bound is not None], dtype=torch.float64)
-            init_unit = torch.rand(len(self.continuous_positions), dtype=torch.float64).clamp(1e-6, 1.0 - 1e-6)
+            lower = torch.tensor(
+                [bound[0] for bound in bounds if bound is not None],
+                dtype=torch.float64,
+                device=self.device,
+            )
+            upper = torch.tensor(
+                [bound[1] for bound in bounds if bound is not None],
+                dtype=torch.float64,
+                device=self.device,
+            )
+            init_unit = torch.rand(
+                len(self.continuous_positions),
+                dtype=torch.float64,
+                device=self.device,
+            ).clamp(1e-6, 1.0 - 1e-6)
             self.continuous_lower = lower
             self.continuous_upper = upper
             self.continuous_unconstrained = torch.nn.Parameter(torch.logit(init_unit))
@@ -167,9 +239,17 @@ class FactorizedProbabilisticReparameterization:
         self.tau_min = tau_min
 
     def sample(self, num_samples: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        z = torch.empty((num_samples, self.dimension), dtype=torch.float64)
-        x_pr = torch.empty((num_samples, self.dimension), dtype=torch.float64)
-        log_probs = torch.zeros(num_samples, dtype=torch.float64)
+        z = torch.empty(
+            (num_samples, self.dimension),
+            dtype=torch.float64,
+            device=self.device,
+        )
+        x_pr = torch.empty(
+            (num_samples, self.dimension),
+            dtype=torch.float64,
+            device=self.device,
+        )
+        log_probs = torch.zeros(num_samples, dtype=torch.float64, device=self.device)
 
         for logits, warped_choices, dim_idx in zip(
             self.logits,
@@ -192,8 +272,8 @@ class FactorizedProbabilisticReparameterization:
         return z, x_pr, log_probs
 
     def modal_candidate(self) -> tuple[torch.Tensor, torch.Tensor]:
-        z = torch.empty(self.dimension, dtype=torch.float64)
-        x_pr = torch.empty(self.dimension, dtype=torch.float64)
+        z = torch.empty(self.dimension, dtype=torch.float64, device=self.device)
+        x_pr = torch.empty(self.dimension, dtype=torch.float64, device=self.device)
 
         for logits, warped_choices, dim_idx in zip(
             self.logits,
@@ -240,11 +320,11 @@ class FactorizedProbabilisticReparameterization:
 
             self.tau = max(self.tau_min, self.tau * self.tau_decay)
 
-            values_np = values.detach().cpu().numpy()
-            best_idx = int(np.argmax(values_np))
-            if float(values_np[best_idx]) > best_value:
-                best_value = float(values_np[best_idx])
-                best_x = x_pr_samples.detach().cpu().numpy()[best_idx]
+            step_best_value, step_best_idx = torch.max(values.detach(), dim=0)
+            step_best_float = float(step_best_value.cpu().item())
+            if step_best_float > best_value:
+                best_value = step_best_float
+                best_x = x_pr_samples.detach().cpu().numpy()[int(step_best_idx.cpu().item())]
 
         modal_z, modal_x_pr = self.modal_candidate()
         modal_value = float(acquisition(modal_z.reshape(1, -1)).detach().cpu().numpy()[0])
@@ -272,11 +352,13 @@ def optimize_with_restarts(
     config: PROptimizerConfig,
     *,
     seed: int | None = None,
+    device: torch.device | str | None = None,
 ) -> tuple[np.ndarray, float]:
     """Run several PR optimizers and return the best vector/value pair found."""
 
+    resolved_device = torch.device(device) if device is not None else torch.device("cpu")
     pr_dimensions = _coerce_pr_dimensions(dimensions)
-    batch_acquisition = _coerce_batch_acquisition(acquisition)
+    batch_acquisition = _coerce_batch_acquisition(acquisition, device=resolved_device)
     best_x: np.ndarray | None = None
     best_value = -np.inf
 
@@ -289,6 +371,7 @@ def optimize_with_restarts(
             tau_decay=config.tau_decay,
             tau_min=config.tau_min,
             seed=restart_seed,
+            device=resolved_device,
         )
         candidate_x, candidate_value = optimizer.optimize_acquisition(
             batch_acquisition,
@@ -329,28 +412,16 @@ def _coerce_pr_dimensions(
 
 def _coerce_batch_acquisition(
     acquisition: Callable[[torch.Tensor], torch.Tensor],
+    *,
+    device: torch.device,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     def batch_acquisition(z: torch.Tensor) -> torch.Tensor:
         values = acquisition(z)
         if not isinstance(values, torch.Tensor):
-            return torch.as_tensor(values, dtype=torch.float64)
-        return values.to(dtype=torch.float64)
+            return torch.as_tensor(values, dtype=torch.float64, device=device)
+        return values.to(dtype=torch.float64, device=device)
 
     return batch_acquisition
-
-
-def _matern25_kernel(
-    X: torch.Tensor,
-    Y: torch.Tensor,
-    length_scale: torch.Tensor,
-) -> torch.Tensor:
-    scaled_X = X / length_scale
-    scaled_Y = Y / length_scale
-    distances = torch.cdist(scaled_X, scaled_Y)
-    sqrt5_distances = np.sqrt(5.0) * distances
-    return (1.0 + sqrt5_distances + 5.0 / 3.0 * distances * distances) * torch.exp(
-        -sqrt5_distances
-    )
 
 
 def _extract_matern25_and_noise(kernel: Any) -> tuple[Any, float]:

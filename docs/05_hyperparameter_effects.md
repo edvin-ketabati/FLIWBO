@@ -131,8 +131,40 @@ but they cost more GP fits.
 warp_search_n_jobs
 ```
 
-This controls parallel warp scoring. Use `1` for simple debugging. Use `-1` to
-let joblib use available workers.
+This controls joblib parallel warp scoring for the sklearn backend. Use `1` for
+simple debugging. Use `-1` to let joblib use available workers. The Torch
+backend batches warp candidates instead, so this setting is mainly useful for
+`backend="sklearn"`.
+
+## Compute Backend Knobs
+
+```text
+backend
+device
+```
+
+These settings decide where the fixed GP math and PR acquisition search run.
+They do not change the mathematical optimizer mechanism.
+
+```text
+backend="auto"       use Torch on CUDA if available, otherwise Torch on CPU
+backend="torch"      force the Torch backend
+backend="sklearn"    force the original sklearn GP backend
+```
+
+For Torch:
+
+```text
+device="auto"        CUDA if PyTorch can see CUDA, otherwise CPU
+device="cpu"         Torch CPU
+device="cuda"        default CUDA device
+device="cuda:N"      a specific CUDA device
+```
+
+Use `backend="sklearn"` for reference runs or when comparing against older
+results. Use `backend="torch", device="cpu"` to test the Torch implementation
+without a GPU. Use `backend="torch", device="cuda"` when you want GPU-assisted
+batched warp scoring and GPU-side PR acquisition search.
 
 ## Acquisition Search Knobs
 

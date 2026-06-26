@@ -51,6 +51,7 @@ from .BO_utils import beta_t as default_beta_fn
 from .BO_utils import beta_warp_nd, make_warp_library
 from .PR_optimizer import PROptimizerConfig, TorchGaussianProcessUCB, optimize_with_restarts
 from .search_space import Number, SearchSpace
+from .torch_gp import TorchFixedGaussianProcess, resolve_backend_device
 from .warp_optimizer import full_factorized_library_size, optimize_warp_coordinatewise
 
 
@@ -95,6 +96,8 @@ class FLIWBOConfig:
     beta_scaling: float = BETA_SCALING
     warp_search_sweeps: int = WARP_SEARCH_SWEEPS
     warp_search_n_jobs: int = WARP_SEARCH_N_JOBS
+    backend: str = "auto"
+    device: str = "auto"
     pr_config: PROptimizerConfig = field(default_factory=default_pr_config)
     pr_seed: int | None = None
     log_csv: bool = False
@@ -179,6 +182,10 @@ class FLIWBOOptimizer:
         self.config = config or FLIWBOConfig()
         self.beta_fn = beta_fn
         self._validate_config()
+        self._backend_selection = resolve_backend_device(
+            self.config.backend,
+            self.config.device,
+        )
 
     def start(
         self,
@@ -247,14 +254,7 @@ class FLIWBOOptimizer:
         y = self._normalize_y(y_raw)
         noise_var = (self.config.noise_std / self.config.y_scale) ** 2
 
-        kernel = Matern(length_scale=self.config.lengthscale, nu=2.5) + WhiteKernel(
-            noise_level=noise_var
-        )
-        gpr_template = GaussianProcessRegressor(
-            kernel=kernel,
-            optimizer=None,
-            normalize_y=False,
-        )
+        gpr_template = self._make_gpr_template(noise_var)
 
         one_dim_warp_pairs = make_warp_library(epsilon=self.config.epsilon_warp)
         n_full_warp_library = full_factorized_library_size(
@@ -265,6 +265,7 @@ class FLIWBOOptimizer:
         self._log(f"N_eps per coordinate: {len(one_dim_warp_pairs)}")
         self._log(f"N_eps full factorized library: {n_full_warp_library}")
         self._log(f"BO iteration {iteration}/{self.config.n_iters}")
+        self._log(self._backend_log_message())
 
         beta_value = self._beta_value(iteration, n_full_warp_library)
         prior_weight = self.config.warp_prior_weight if self.config.use_warp_prior else 0.0
@@ -284,7 +285,12 @@ class FLIWBOOptimizer:
         beta_chosen = warp_result.beta
         winning_gpr = warp_result.gpr
 
-        torch_acquisition = TorchGaussianProcessUCB(winning_gpr, beta_value)
+        pr_device = self._backend_selection.device
+        torch_acquisition = TorchGaussianProcessUCB(
+            winning_gpr,
+            beta_value,
+            device=pr_device,
+        )
         pr_dimensions = self.search_space.pr_dimension_specs(alpha_chosen, beta_chosen)
 
         x_next_pr, _pr_acquisition_value = optimize_with_restarts(
@@ -292,13 +298,14 @@ class FLIWBOOptimizer:
             pr_dimensions,
             self.config.pr_config,
             seed=self.config.pr_seed,
+            device=torch_acquisition.device,
         )
         x_next_raw = self.search_space.raw_from_pr_vector(
             x_next_pr,
             alpha_chosen,
             beta_chosen,
         )
-        acquisition_value = self._sklearn_ucb_value(
+        acquisition_value = self._gp_ucb_value(
             winning_gpr,
             x_next_raw,
             alpha_chosen,
@@ -331,9 +338,28 @@ class FLIWBOOptimizer:
             )
         return self.search_space.project_matrix(X)
 
-    def _sklearn_ucb_value(
+    def _make_gpr_template(self, noise_var: float):
+        if self._backend_selection.backend == "torch":
+            if self._backend_selection.device is None:
+                raise RuntimeError("Torch backend selected without a resolved Torch device")
+            return TorchFixedGaussianProcess(
+                length_scale=self.config.lengthscale,
+                noise_level=noise_var,
+                device=self._backend_selection.device,
+            )
+
+        kernel = Matern(length_scale=self.config.lengthscale, nu=2.5) + WhiteKernel(
+            noise_level=noise_var
+        )
+        return GaussianProcessRegressor(
+            kernel=kernel,
+            optimizer=None,
+            normalize_y=False,
+        )
+
+    def _gp_ucb_value(
         self,
-        gpr: GaussianProcessRegressor,
+        gpr: object,
         x_raw: np.ndarray,
         alpha: np.ndarray,
         beta: np.ndarray,
@@ -343,6 +369,16 @@ class FLIWBOOptimizer:
         z = beta_warp_nd(x_model, alpha, beta)
         mu, std = gpr.predict(z, return_std=True)
         return float(mu[0] + np.sqrt(beta_value) * std[0])
+
+    def _sklearn_ucb_value(
+        self,
+        gpr: GaussianProcessRegressor,
+        x_raw: np.ndarray,
+        alpha: np.ndarray,
+        beta: np.ndarray,
+        beta_value: float,
+    ) -> float:
+        return self._gp_ucb_value(gpr, x_raw, alpha, beta, beta_value)
 
     def _normalize_y(self, y_raw: np.ndarray) -> np.ndarray:
         return (np.asarray(y_raw, dtype=float).ravel() - self.config.y_center) / self.config.y_scale
@@ -374,6 +410,20 @@ class FLIWBOOptimizer:
             )
         if self.config.warp_prior_tau <= 0.0:
             raise ValueError(f"warp_prior_tau must be positive, got {self.config.warp_prior_tau}")
+        if self.config.backend not in {"auto", "sklearn", "torch"}:
+            raise ValueError(
+                "backend must be 'auto', 'sklearn', or 'torch', "
+                f"got {self.config.backend!r}"
+            )
+        if (
+            self.config.device != "auto"
+            and self.config.device != "cpu"
+            and not self.config.device.startswith("cuda")
+        ):
+            raise ValueError(
+                "device must be 'auto', 'cpu', 'cuda', or 'cuda:N', "
+                f"got {self.config.device!r}"
+            )
 
     def _resolve_run_dir(self, run_dir: str | Path | None) -> Path | None:
         if run_dir is not None:
@@ -389,6 +439,11 @@ class FLIWBOOptimizer:
     def _log(self, message: str) -> None:
         if self.config.verbose:
             print(message)
+
+    def _backend_log_message(self) -> str:
+        if self._backend_selection.backend == "sklearn":
+            return "Backend: sklearn"
+        return f"Backend: torch ({self._backend_selection.device})"
 
 
 class OptimizationRun:

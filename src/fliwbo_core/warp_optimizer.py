@@ -14,6 +14,7 @@ from joblib import Parallel, delayed
 from sklearn.base import clone
 
 from .BO_utils import beta_warp_nd, log_prior_unity_weak
+from .torch_gp import TorchFixedGaussianProcess
 
 
 @dataclass(frozen=True)
@@ -140,7 +141,7 @@ def fit_and_score_warp(
     """
 
     Z = beta_warp_nd(X, alpha_vec, beta_vec)
-    gpr = clone(gpr_template)
+    gpr = _clone_gpr_template(gpr_template)
     gpr.fit(Z, y)
 
     lml = float(gpr.log_marginal_likelihood_value_)
@@ -188,6 +189,19 @@ def _score_coordinate_candidates(
     prior_tau: float,
     n_jobs: int,
 ) -> list[tuple[int, float]]:
+    if isinstance(gpr_template, TorchFixedGaussianProcess):
+        return _score_coordinate_candidates_torch(
+            candidate_pair_indices,
+            coord_idx,
+            current_indices,
+            one_dim_warp_pairs,
+            X,
+            y,
+            gpr_template,
+            prior_weight,
+            prior_tau,
+        )
+
     if n_jobs == 1:
         return [
             _score_coordinate_candidate(
@@ -235,9 +249,56 @@ def _score_coordinate_candidates(
         )
 
 
+def _score_coordinate_candidates_torch(
+    candidate_pair_indices,
+    coord_idx: int,
+    current_indices: np.ndarray,
+    one_dim_warp_pairs: list[tuple[float, float]],
+    X: np.ndarray,
+    y: np.ndarray,
+    gpr_template: TorchFixedGaussianProcess,
+    prior_weight: float,
+    prior_tau: float,
+) -> list[tuple[int, float]]:
+    candidate_pair_indices = list(candidate_pair_indices)
+    if not candidate_pair_indices:
+        return []
+
+    alpha_batch = np.empty((len(candidate_pair_indices), X.shape[1]), dtype=float)
+    beta_batch = np.empty_like(alpha_batch)
+    Z_batch = np.empty((len(candidate_pair_indices), X.shape[0], X.shape[1]), dtype=float)
+
+    for batch_idx, candidate_pair_idx in enumerate(candidate_pair_indices):
+        candidate_indices = current_indices.copy()
+        candidate_indices[coord_idx] = candidate_pair_idx
+        alpha_vec, beta_vec = indices_to_warp_vectors(candidate_indices, one_dim_warp_pairs)
+        alpha_batch[batch_idx] = alpha_vec
+        beta_batch[batch_idx] = beta_vec
+        Z_batch[batch_idx] = beta_warp_nd(X, alpha_vec, beta_vec)
+
+    lml_values = gpr_template.batch_log_marginal_likelihood(Z_batch, y)
+    results: list[tuple[int, float]] = []
+    for candidate_pair_idx, alpha_vec, beta_vec, lml in zip(
+        candidate_pair_indices,
+        alpha_batch,
+        beta_batch,
+        lml_values,
+    ):
+        log_prior = log_prior_unity_weak(alpha_vec, beta_vec, tau=prior_tau)
+        score = float(lml) + prior_weight * log_prior
+        results.append((int(candidate_pair_idx), float(score)))
+    return results
+
+
 def _unity_like_pair_index(one_dim_warp_pairs: list[tuple[float, float]]) -> int:
     log_distances = [
         np.log(alpha) ** 2 + np.log(beta) ** 2
         for alpha, beta in one_dim_warp_pairs
     ]
     return int(np.argmin(log_distances))
+
+
+def _clone_gpr_template(gpr_template):
+    if isinstance(gpr_template, TorchFixedGaussianProcess):
+        return gpr_template.clone_unfitted()
+    return clone(gpr_template)

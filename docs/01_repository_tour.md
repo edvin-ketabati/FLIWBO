@@ -40,6 +40,7 @@ src/fliwbo_core/
 |-- BO_utils.py         # beta warps and BO schedules
 |-- warp_optimizer.py   # chooses the best input warp from a finite library
 |-- PR_optimizer.py     # searches typed spaces for the best acquisition value
+|-- torch_gp.py         # Torch fixed-GP backend for batched warp scoring
 |-- search_space.py     # typed search-space projection and normalization
 |-- decoder.py          # helper for decoding ordered resource maps
 `-- BO_config.py        # default knobs and constants

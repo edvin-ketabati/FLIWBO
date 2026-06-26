@@ -128,6 +128,27 @@ print(result.best_x)
 print(result.best_y)
 ```
 
+## Compute Backend
+
+By default, `FLIWBOConfig(backend="auto", device="auto")` uses the Torch
+backend. It runs on CUDA when PyTorch can see a CUDA device, otherwise it runs
+on CPU. The Torch backend keeps the same optimizer mechanism: the same finite
+Beta-CDF warp library, the same coordinate-wise warp search, the same fixed
+Matern-5/2 GP with white noise, and the same PR acquisition search.
+
+To force a specific mode:
+
+```python
+config = FLIWBOConfig(
+    backend="torch",   # "auto", "torch", or "sklearn"
+    device="cuda",     # "auto", "cpu", "cuda", or "cuda:N"
+)
+```
+
+Use `backend="sklearn"` if you want the original sklearn GP path for debugging
+or comparison. Use `backend="torch", device="cpu"` to exercise the accelerated
+code path without requiring a GPU.
+
 Mixed spaces use the same optimizer:
 
 ```python
